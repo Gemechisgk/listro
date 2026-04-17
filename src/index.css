@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", serif;
+
+  --color-gold: var(--gold);
+  --color-luxury-black: var(--bg-main);
+  --color-luxury-gray: var(--bg-card);
+  --color-luxury-border: var(--border-luxury);
+  --color-text-dim: var(--text-dim);
+}
+
+:root {
+  --gold: #D4AF37;
+  --bg-main: #0F0F0F;
+  --bg-card: #1A1A1A;
+  --border-luxury: #2A2A2A;
+  --text-dim: #888888;
+  --text-main: #FFFFFF;
+  --texture: url("https://www.transparenttextures.com/patterns/dark-leather.png");
+}
+
+:root.light {
+  --bg-main: #F8F9FA;
+  --bg-card: #FFFFFF;
+  --border-luxury: #E5E7EB;
+  --text-dim: #6B7280;
+  --text-main: #111827;
+  --texture: url("https://www.transparenttextures.com/patterns/gray-floral.png");
+}
+
+@layer base {
+  body {
+    @apply antialiased overflow-x-hidden transition-colors duration-500 min-h-screen flex flex-col;
+    color: var(--text-main);
+    background-color: var(--bg-main);
+    background-image: var(--texture);
+  }
+}
+
+@layer components {
+  .step-num {
+    @apply w-7 h-7 border border-current flex items-center justify-center text-[10px] rounded opacity-40;
+  }
+  
+  .step-active .step-num {
+    @apply bg-gold border-gold text-white font-bold opacity-100;
+  }
+
+  .luxury-card {
+    @apply backdrop-blur-sm border border-luxury-border rounded-xl p-6 transition-all duration-500;
+    background-color: color-mix(in srgb, var(--bg-card), transparent 20%);
+  }
+
+  .luxury-card:hover {
+    @apply border-gold/40 shadow-[0_0_30px_rgba(212,175,55,0.05)];
+  }
+  
+  .luxury-input {
+    @apply border border-luxury-border rounded p-4 text-xs placeholder:opacity-30 focus:outline-none focus:border-gold italic transition-all backdrop-blur-md;
+    background-color: color-mix(in srgb, var(--bg-main), transparent 95%);
+    color: var(--text-main);
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+

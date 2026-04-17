@@ -1,0 +1,6 @@
+{
+  "name": "ሊ stro - Premium Shoe Care",
+  "description": "A high-end platform for professional shoe cleaning services, featuring seamless ordering, pickup logistics, and custom care options.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": []
+}

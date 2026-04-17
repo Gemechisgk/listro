@@ -1,0 +1,890 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState, useEffect, useMemo, ChangeEvent } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  Plus, Minus, MapPin, Truck, Store, 
+  Sparkles, ShieldCheck, Zap, ArrowRight, 
+  CheckCircle2, Loader2, ChevronLeft, LogOut,
+  User as UserIcon, History, Star, Ticket, Gift,
+  Camera, Image as ImageIcon, CreditCard, ExternalLink,
+  Clock, PackageCheck, Thermometer, Search,
+  Sun, Moon, Download
+} from 'lucide-react';
+import axios from 'axios';
+import { nanoid } from 'nanoid';
+import { 
+  signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, User 
+} from 'firebase/auth';
+import { 
+  collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, doc, updateDoc, getDoc, setDoc, increment 
+} from 'firebase/firestore';
+import { auth, db } from './lib/firebase';
+import { cn, formatCurrency } from './lib/utils';
+import { AVAILABLE_SERVICES, type LogisticsType, type Order, type UserProfile } from './types';
+
+// Components
+const Button = ({ 
+  children, className, variant = 'primary', size = 'md', isLoading, disabled, ...props 
+}: any) => {
+  const variants = {
+    primary: 'bg-gold text-luxury-black hover:bg-gold/90 border-transparent font-bold tracking-widest uppercase',
+    secondary: 'bg-luxury-gray text-white hover:bg-luxury-gray/80 border-luxury-border',
+    outline: 'bg-transparent border-luxury-border text-white hover:bg-white/5',
+    ghost: 'bg-transparent text-white/60 hover:text-white',
+  };
+  
+  const sizes = {
+    sm: 'px-3 py-1.5 text-[10px]',
+    md: 'px-6 py-3 text-sm',
+    lg: 'px-8 py-4 text-base',
+  };
+
+  return (
+    <button 
+      className={cn(
+        'relative inline-flex items-center justify-center rounded transition-all duration-300 border focus:outline-none focus:ring-1 focus:ring-gold/50 disabled:opacity-50 disabled:cursor-not-allowed',
+        variants[variant as keyof typeof variants],
+        sizes[size as keyof typeof sizes],
+        className
+      )}
+      disabled={isLoading || disabled}
+      {...props}
+    >
+      {isLoading ? (
+        <Loader2 className="w-5 h-5 animate-spin mr-2" />
+      ) : null}
+      {children}
+    </button>
+  );
+};
+
+const StarRating = ({ rating, setRating, interactive = false }: { rating: number, setRating?: (n: number) => void, interactive?: boolean }) => {
+  return (
+    <div className="flex gap-1">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          onClick={() => interactive && setRating?.(star)}
+          className={cn(
+            "transition-colors",
+            star <= rating ? "text-gold" : "text-white/10",
+            interactive ? "hover:scale-110 active:scale-95" : "cursor-default"
+          )}
+        >
+          <Star className={cn(interactive ? "w-6 h-6" : "w-4 h-4", star <= rating && "fill-current")} />
+        </button>
+      ))}
+    </div>
+  );
+};
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [step, setStep] = useState(0); // 0: Config/Summary, 1: Logistics, 2: Final Review, 3: Success
+  const [view, setView] = useState<'home' | 'history'>('home');
+  const [orders, setOrders] = useState<Order[]>([]);
+
+  // Booking State
+  const [quantity, setQuantity] = useState(1);
+  const [logistics, setLogistics] = useState<LogisticsType>('drop-off');
+  const [selectedServices, setSelectedServices] = useState<string[]>(['deep-cleaning']);
+  const [customService, setCustomService] = useState('');
+  const [address, setAddress] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [shoeImages, setShoeImages] = useState<string[]>([]);
+  const [paymentStatus, setPaymentStatus] = useState<'idle' | 'initializing' | 'waiting' | 'failed'>('idle');
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  
+  // Loyalty & Discounts
+  const [couponCode, setCouponCode] = useState('');
+  const [discountValue, setDiscountValue] = useState(0);
+  const [redeemPoints, setRedeemPoints] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        // Fetch or create profile
+        const userRef = doc(db, 'users', u.uid);
+        const userDoc = await getDoc(userRef);
+        if (userDoc.exists()) {
+          setProfile(userDoc.data() as UserProfile);
+        } else {
+          const newProfile = {
+            uid: u.uid,
+            email: u.email || '',
+            displayName: u.displayName || '',
+            photoURL: u.photoURL || '',
+            loyaltyPoints: 0,
+            createdAt: new Date().toISOString()
+          };
+          await setDoc(userRef, newProfile);
+          setProfile(newProfile as UserProfile);
+        }
+      }
+      setLoading(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(
+      collection(db, 'orders'),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
+      
+      // Update local profile points if needed (simple sync)
+      const userRef = doc(db, 'users', user.uid);
+      getDoc(userRef).then(d => d.exists() && setProfile(d.data() as UserProfile));
+    });
+    return unsubscribe;
+  }, [user]);
+
+  useEffect(() => {
+    const root = window.document.documentElement;
+    if (theme === 'light') root.classList.add('light');
+    else root.classList.remove('light');
+  }, [theme]);
+
+  useEffect(() => {
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    });
+  }, []);
+
+  const installPWA = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') setDeferredPrompt(null);
+    }
+  };
+
+  const subtotal = useMemo(() => {
+    const servicesTotal = selectedServices.reduce((acc, serviceId) => {
+      const service = AVAILABLE_SERVICES.find(s => s.id === serviceId);
+      return acc + (service?.pricePerShoe || 0);
+    }, 0);
+    return quantity * servicesTotal;
+  }, [quantity, selectedServices]);
+
+  const logisticsFee = logistics === 'pickup' ? 1000 : 0;
+  const referralDiscount = discountValue;
+  const loyaltySavings = redeemPoints ? Math.min(subtotal + logisticsFee, (profile?.loyaltyPoints || 0) / 10) : 0;
+  const total = Math.max(0, subtotal + logisticsFee - referralDiscount - loyaltySavings);
+
+  const handleLogin = async () => {
+    try {
+      await signInWithPopup(auth, new GoogleAuthProvider());
+    } catch (error) {
+      console.error('Login failed:', error);
+    }
+  };
+
+  const applyCoupon = () => {
+    if (couponCode.toUpperCase() === 'LISTRO20') {
+      setDiscountValue(2000);
+      alert('Coupon applied! 2000 ETB off.');
+    } else {
+      alert('Invalid coupon code. Try LISTRO20');
+      setDiscountValue(0);
+    }
+  };
+
+  const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files) {
+      // For the demo, we use local object URLs. 
+      // In production, these should be uploaded to Firebase Storage.
+      const newImages = Array.from(files).map(file => URL.createObjectURL(file as Blob));
+      setShoeImages(prev => [...prev, ...newImages]);
+    }
+  };
+
+  const initPayment = async () => {
+    if (!user) return null;
+    setPaymentStatus('initializing');
+    try {
+      const tx_ref = `listro-${nanoid(8)}`;
+      const response = await axios.post('/api/payments/initialize', {
+        amount: total,
+        email: user.email,
+        firstName: user.displayName?.split(' ')[0] || 'Atelier',
+        lastName: user.displayName?.split(' ')[1] || 'Guest',
+        tx_ref,
+        return_url: window.location.origin + '?payment=success&ref=' + tx_ref
+      });
+
+      if (response.data.status === 'success') {
+        const checkout_url = response.data.data.checkout_url;
+        setPaymentStatus('waiting');
+        return { tx_ref, checkout_url };
+      }
+      throw new Error('Payment initialization failed');
+    } catch (error) {
+      console.error('Payment Error:', error);
+      setPaymentStatus('failed');
+      return null;
+    }
+  };
+
+  const placeOrder = async () => {
+    if (!user) return;
+    setIsSubmitting(true);
+    try {
+      const paymentInfo = await initPayment();
+      if (!paymentInfo) {
+        setIsSubmitting(false);
+        return;
+      }
+
+      const { tx_ref, checkout_url } = paymentInfo;
+      const pointsToEarn = Math.floor(total);
+      const pointsToSpend = redeemPoints ? loyaltySavings * 10 : 0;
+
+      const orderData: any = {
+        userId: user.uid,
+        quantity,
+        logistics,
+        services: selectedServices,
+        address: logistics === 'pickup' ? address : 'Shop Drop-off',
+        status: 'pending',
+        paymentStatus: 'pending',
+        tx_ref,
+        estimatedCost: total,
+        discountApplied: referralDiscount + loyaltySavings,
+        pointsEarned: pointsToEarn,
+        shoeImages: shoeImages.map((_, i) => `image_${i}.jpg`), // Placeholder naming
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      
+      if (customService) {
+        orderData.customService = customService;
+      }
+      
+      await addDoc(collection(db, 'orders'), orderData);
+      
+      // Update loyalty points
+      const userRef = doc(db, 'users', user.uid);
+      await updateDoc(userRef, {
+        loyaltyPoints: increment(pointsToEarn - pointsToSpend)
+      });
+
+      // Redirect immediately using the URL from paymentInfo
+      if (checkout_url) {
+        window.location.href = checkout_url;
+      } else {
+        setStep(3); // Completion screen
+      }
+    } catch (error) {
+      console.error('Failed to place order:', error);
+      alert('Order failed. Please check your connection.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const submitReview = async (orderId: string, rating: number, reviewText: string) => {
+    const orderRef = doc(db, 'orders', orderId);
+    await updateDoc(orderRef, {
+      rating,
+      review: reviewText,
+      updatedAt: serverTimestamp()
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen">
+        <Loader2 className="w-12 h-12 text-gold animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen relative overflow-hidden px-6 text-center">
+        <div className="absolute inset-0 grayscale opacity-10">
+          <img src="https://images.unsplash.com/photo-1549298916-b41d501d3772?auto=format&fit=crop&q=80&w=1920&h=1080" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+        </div>
+        <div className="relative z-10 max-w-sm">
+          <h1 className="font-serif text-6xl mb-4 text-gold tracking-[0.2em]">ሊ STRO</h1>
+          <p className="text-text-dim mb-12 tracking-widest font-light text-xs uppercase italic">Excellence in every fiber.</p>
+          <Button onClick={handleLogin} size="lg" className="w-full rounded-none">
+            Authenticate
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col font-sans">
+      <header className="h-20 px-4 md:px-10 flex justify-between items-center border-b border-luxury-border sticky top-0 z-50 backdrop-blur-md bg-opacity-80" style={{ backgroundColor: 'var(--bg-main)' }}>
+        <div className="flex items-center gap-4">
+          <div className="text-xl md:text-2xl font-bold tracking-[0.2em] text-gold font-serif cursor-pointer" onClick={() => { setStep(0); setView('home'); }}>ሊ STRO</div>
+          {deferredPrompt && (
+            <button onClick={installPWA} className="p-2 text-gold animate-bounce" title="Install App">
+              <Download className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2 md:gap-8">
+          <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 text-gold/60 hover:text-gold transition-colors">
+            {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
+          <div className="hidden sm:flex flex-col items-end">
+            <span className="text-[10px] text-luxury-border uppercase tracking-widest font-bold">Loyalty Points</span>
+            <span className="text-gold font-medium flex items-center gap-1.5 text-xs md:text-sm">
+              <Gift className="w-3 h-3" />
+              {profile?.loyaltyPoints || 0}
+            </span>
+          </div>
+          <div className="hidden sm:block h-8 w-[1px] bg-luxury-border" />
+          <div className="flex items-center gap-2 md:gap-3">
+             <div className="text-right">
+                <p className="text-[10px] md:text-xs font-bold uppercase tracking-tighter opacity-80 max-w-[80px] md:max-w-none truncate">{user.displayName}</p>
+                <button onClick={() => setView(view === 'history' ? 'home' : 'history')} className="text-[9px] md:text-[10px] text-gold uppercase tracking-widest hover:underline">
+                   {view === 'history' ? 'Dashboard' : 'History'}
+                </button>
+             </div>
+             <div className="w-8 h-8 md:w-10 md:h-10 rounded-full border border-luxury-border overflow-hidden flex-shrink-0">
+                <img src={user.photoURL || ''} className="w-full h-full object-cover" />
+             </div>
+             <button onClick={() => signOut(auth)} className="p-1 md:p-2 text-white/20 hover:text-white transition-colors">
+                <LogOut className="w-4 h-4 md:w-5 md:h-5" />
+             </button>
+          </div>
+        </div>
+      </header>
+
+      <main className={cn("flex-1 p-4 md:p-10 gap-6 md:gap-10", view === 'home' && step < 3 ? "flex flex-col lg:grid lg:grid-cols-[350px_1fr]" : "flex flex-col max-w-4xl mx-auto w-full")}>
+        {view === 'home' && step < 3 && (
+          <aside className="flex flex-col gap-6 lg:h-[calc(100vh-140px)] lg:sticky lg:top-28">
+            <div className="luxury-card border-none bg-transparent lg:bg-luxury-gray/80 lg:border lg:border-luxury-border p-2 lg:p-6 rounded-xl">
+               <div className="flex flex-row lg:flex-col gap-4 lg:gap-6 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0 scrollbar-hide">
+                  {[
+                    { n: '01', l: 'Atelier', s: 0 },
+                    { n: '02', l: 'Logistics', s: 1 },
+                    { n: '03', l: 'Review', s: 2 }
+                  ].map(st => (
+                    <div key={st.n} className={cn("flex items-center gap-4 transition-opacity flex-shrink-0", step === st.s ? "opacity-100" : "opacity-30")}>
+                      <div className={cn("step-num", step === st.s && "bg-gold border-gold text-white font-bold text-xs")}>{st.n}</div>
+                      <span className="text-xs lg:text-sm font-medium tracking-wide">{st.l}</span>
+                    </div>
+                  ))}
+               </div>
+            </div>
+
+            <div className="luxury-card flex flex-col gap-6">
+               <h3 className="text-[10px] uppercase tracking-[0.2em] text-text-dim font-bold">Order Selection</h3>
+               <div className="space-y-4">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-text-dim">Items</span>
+                    <span>{quantity} {quantity === 1 ? 'Pair' : 'Pairs'}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-text-dim">Base Care</span>
+                    <span className="text-right max-w-[150px] truncate">
+                      {selectedServices.map(sid => AVAILABLE_SERVICES.find(s => s.id === sid)?.name).join(', ')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-text-dim">Logistics</span>
+                    <span className="capitalize">{logistics}</span>
+                  </div>
+
+                  {logistics === 'pickup' && (
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-text-dim">Pickup Fee</span>
+                      <span>{formatCurrency(1000)}</span>
+                    </div>
+                  )}
+
+                  {discountValue > 0 && (
+                    <div className="flex justify-between items-center text-sm text-green-500">
+                      <span className="flex items-center gap-1 font-bold tracking-tighter">DISCOUNT</span>
+                      <span>-{formatCurrency(discountValue)}</span>
+                    </div>
+                  )}
+
+                  {redeemPoints && loyaltySavings > 0 && (
+                    <div className="flex justify-between items-center text-sm text-gold">
+                      <span className="flex items-center gap-1 font-bold tracking-tighter uppercase">POINTS</span>
+                      <span>-{formatCurrency(loyaltySavings)}</span>
+                    </div>
+                  )}
+
+                  <div className="pt-6 border-t border-luxury-border flex justify-between items-center">
+                    <span className="text-lg font-bold">Total</span>
+                    <span className="text-2xl font-bold text-gold">{formatCurrency(total)}</span>
+                  </div>
+               </div>
+            </div>
+          </aside>
+        )}
+
+        <div className="flex flex-col gap-10">
+          <AnimatePresence mode="wait">
+            {view === 'history' ? (
+              <motion.div key="history" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+                <h2 className="text-3xl font-serif">Mission Archive</h2>
+                {orders.length === 0 ? (
+                   <div className="luxury-card text-center py-20 space-y-4">
+                      <History className="w-12 h-12 text-white/5 mx-auto" />
+                      <p className="text-text-dim italic">No previous engagements found.</p>
+                   </div>
+                ) : (
+                  <div className="grid gap-6">
+                    {orders.map(o => (
+                      <div key={o.id} className="luxury-card flex flex-col gap-4">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="text-[10px] uppercase text-text-dim mb-1 font-bold">{o.createdAt?.toDate?.()?.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) || 'Recent Engagement'}</p>
+                            <h4 className="font-serif text-lg">{o.quantity} {o.quantity === 1 ? 'Pair' : 'Pairs'} Restoration</h4>
+                          </div>
+                          <div className="text-right">
+                             <span className={cn(
+                               "px-2 py-1 border text-[8px] uppercase tracking-widest rounded font-bold",
+                               o.status === 'completed' ? "border-green-500/30 text-green-500" : 
+                               o.status === 'cancelled' ? "border-red-500/30 text-red-500" :
+                               "border-gold/30 text-gold"
+                             )}>{o.status.replace('-', ' ')}</span>
+                             <p className="text-gold font-bold mt-2">{formatCurrency(o.estimatedCost)}</p>
+                          </div>
+                        </div>
+
+                        {/* Order Timeline */}
+                        <div className="py-10 overflow-x-auto scrollbar-hide -mx-6 px-6">
+                          <div className="flex items-center justify-between min-w-[650px] mb-12 relative px-2">
+                             {[
+                               { id: 'pending', label: 'Received', icon: Clock },
+                               { id: 'confirmed', label: 'Accepted', icon: ShieldCheck },
+                               { id: 'cleaning', label: 'Cleaning', icon: Sparkles },
+                               { id: 'drying', label: 'Drying', icon: Thermometer },
+                               { id: 'quality-check', label: 'Polish', icon: Search },
+                               { id: 'ready', label: 'Ready', icon: PackageCheck }
+                             ].map((st, idx, arr) => {
+                               const statuses = arr.map(a => a.id);
+                               const currentIndex = statuses.indexOf(o.status === 'completed' ? 'ready' : o.status);
+                               const isActive = idx <= currentIndex && o.status !== 'cancelled';
+                               const isCurrent = st.id === o.status;
+                               
+                               return (
+                                 <div key={st.id} className="flex items-center flex-1 last:flex-none">
+                                   <div className="flex flex-col items-center gap-2 relative">
+                                      <div className={cn(
+                                        "w-9 h-9 md:w-11 md:h-11 rounded-full border flex items-center justify-center transition-all duration-700 z-10",
+                                        isActive ? "bg-gold border-gold text-[#0F0F0F] shadow-[0_0_20px_rgba(212,175,55,0.4)]" : "bg-luxury-gray/30 border-luxury-border text-text-dim",
+                                        isCurrent && "ring-4 ring-gold/30 scale-110"
+                                      )}>
+                                         <st.icon className="w-4 h-4 md:w-5 md:h-5" />
+                                      </div>
+                                      <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 w-20 text-center">
+                                        <span className={cn(
+                                          "text-[8px] md:text-[9px] uppercase tracking-[0.15em] font-bold block transition-colors duration-500", 
+                                          isActive ? "text-gold" : "text-text-dim"
+                                        )}>
+                                          {st.label}
+                                        </span>
+                                      </div>
+                                   </div>
+                                   {idx < arr.length - 1 && (
+                                     <div className="flex-1 h-[2px] mx-1 relative overflow-hidden bg-luxury-border/30 rounded-full">
+                                        <motion.div 
+                                          initial={{ scaleX: 0 }}
+                                          animate={{ scaleX: isActive ? 1 : 0 }}
+                                          className="absolute inset-0 bg-gold origin-left transition-transform duration-1000 shadow-[0_0_10px_rgba(212,175,55,0.5)]"
+                                        />
+                                     </div>
+                                   )}
+                                 </div>
+                               );
+                             })}
+                          </div>
+                        </div>
+                        
+                        {o.status === 'completed' && !o.rating && (
+                          <div className="pt-4 border-t border-luxury-border">
+                             <p className="text-[10px] uppercase tracking-widest text-text-dim mb-4 font-bold">Feedback Required</p>
+                             <ReviewForm orderId={o.id!} onSubmit={submitReview} />
+                          </div>
+                        )}
+
+                        {(o.rating || o.review) && (
+                           <div className="pt-4 border-t border-luxury-border flex items-start gap-4">
+                              <StarRating rating={o.rating || 0} />
+                              <div className="flex-1">
+                                 {o.review && <p className="text-xs text-text-dim italic leading-relaxed">"{o.review}"</p>}
+                              </div>
+                           </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            ) : step === 0 ? (
+              <motion.div key="conf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-12">
+                <div className="relative h-48 md:h-64 rounded-xl overflow-hidden group">
+                  <img 
+                    src="https://picsum.photos/seed/luxury-shoe-care/1200/600" 
+                    className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-luxury-black via-transparent to-transparent" />
+                  <div className="absolute bottom-4 md:bottom-6 left-4 md:left-6 right-4 md:right-6">
+                    <p className="text-gold text-[8px] md:text-[10px] uppercase tracking-[0.4em] font-bold mb-1">Elite Workshop</p>
+                    <h3 className="text-xl md:text-2xl font-serif">Exhibition Grade Care</h3>
+                  </div>
+                </div>
+                
+                <section>
+                  <div className="mb-6 md:mb-8">
+                    <h2 className="text-2xl md:text-3xl font-light mb-1">Quantity & Logistics</h2>
+                    <p className="text-text-dim text-xs md:text-sm">Define the scope of your restoration.</p>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-8 sm:gap-16 sm:items-end">
+                    <div className="space-y-3">
+                      <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Pairs to Restore</p>
+                      <div className="flex items-center gap-6">
+                        <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="w-10 h-10 rounded border border-luxury-border bg-luxury-black hover:bg-gold hover:text-luxury-black transition-all">-</button>
+                        <span className="text-2xl md:text-3xl font-serif w-8 text-center">{quantity}</span>
+                        <button onClick={() => setQuantity(quantity + 1)} className="w-10 h-10 rounded border border-luxury-border bg-luxury-black hover:bg-gold hover:text-luxury-black transition-all">+</button>
+                      </div>
+                    </div>
+                    <div className="space-y-3 flex-1 max-w-sm">
+                      <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Movement Method</p>
+                      <div className="bg-luxury-black p-1.5 rounded-lg border border-luxury-border flex">
+                        <button onClick={() => setLogistics('drop-off')} className={cn("flex-1 py-1.5 rounded text-[10px] md:text-[11px] font-bold uppercase tracking-widest transition-all", logistics === 'drop-off' ? "bg-gold text-luxury-black shadow-lg" : "text-text-dim")}>Drop-off</button>
+                        <button onClick={() => setLogistics('pickup')} className={cn("flex-1 py-1.5 rounded text-[10px] md:text-[11px] font-bold uppercase tracking-widest transition-all", logistics === 'pickup' ? "bg-gold text-luxury-black shadow-lg" : "text-text-dim")}>Pickup</button>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section>
+                  <div className="mb-6 md:mb-8">
+                    <h2 className="text-2xl md:text-3xl font-light mb-1">Footwear Photography</h2>
+                    <p className="text-text-dim text-xs md:text-sm">Document your items for our preservation archive.</p>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-4">
+                    {shoeImages.map((src, idx) => (
+                      <div key={idx} className="aspect-square rounded-lg border border-luxury-border overflow-hidden relative group">
+                        <img src={src} className="w-full h-full object-cover" />
+                        <button 
+                          onClick={() => setShoeImages(prev => prev.filter((_, i) => i !== idx))}
+                          className="absolute top-1 right-1 bg-red-500/80 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                    <label className="aspect-square rounded-lg border border-dashed border-luxury-border flex flex-col items-center justify-center cursor-pointer hover:border-gold hover:bg-gold/5 transition-all group">
+                      <Camera className="w-6 h-6 text-text-dim group-hover:text-gold mb-2" />
+                      <span className="text-[10px] uppercase font-bold text-text-dim group-hover:text-gold">Add Photo</span>
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
+                    </label>
+                  </div>
+                </section>
+
+                <section>
+                  <div className="mb-6 md:mb-8">
+                    <h2 className="text-2xl md:text-3xl font-light mb-1">Customization</h2>
+                    <p className="text-text-dim text-xs md:text-sm">Expert treatments tailored to your footwear.</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+                    {AVAILABLE_SERVICES.map(service => {
+                      const selected = selectedServices.includes(service.id);
+                      return (
+                        <div 
+                          key={service.id} 
+                          onClick={() => setSelectedServices(prev => selected ? prev.filter(x => x !== service.id) : [...prev, service.id])} 
+                          className={cn(
+                            "luxury-card cursor-pointer transition-all hover:border-gold/50 flex flex-col h-full overflow-hidden group", 
+                            selected && "border-gold ring-1 ring-gold shadow-[0_0_20px_rgba(212,175,55,0.15)] bg-gold/5"
+                          )}
+                        >
+                          <div className="h-32 mb-4 overflow-hidden -mx-6 -mt-6">
+                             <img 
+                              src={service.image} 
+                              className={cn("w-full h-full object-cover grayscale opacity-50 transition-all duration-700 group-hover:scale-110 group-hover:grayscale-0 group-hover:opacity-100", selected && "grayscale-0 opacity-100 scale-105")}
+                              referrerPolicy="no-referrer"
+                             />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold tracking-tight mb-2 uppercase">{service.name}</h4>
+                            <p className="text-[10px] text-text-dim leading-relaxed mb-6 font-medium italic">{service.description}</p>
+                          </div>
+                          <div className="mt-auto pt-4 border-t border-luxury-border flex justify-between items-center">
+                             <span className="text-gold text-xs font-bold tracking-tighter">{formatCurrency(service.pricePerShoe)} / pair</span>
+                             {selected && <CheckCircle2 className="w-4 h-4 text-gold" />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-6">
+                    <input 
+                      type="text" 
+                      placeholder="Add Custom Service (e.g. Sole repair, Lace replacement)" 
+                      className="w-full bg-transparent border border-dashed border-luxury-border p-4 rounded-lg text-xs italic focus:border-gold focus:outline-none placeholder:text-text-dim"
+                      value={customService}
+                      onChange={(e) => setCustomService(e.target.value)}
+                    />
+                  </div>
+                </section>
+
+                <div className="flex justify-end pt-6">
+                  <Button size="lg" onClick={() => setStep(1)} disabled={selectedServices.length === 0} className="rounded-none px-12">
+                    Proceed to Logistics
+                  </Button>
+                </div>
+              </motion.div>
+            ) : step === 1 ? (
+              <motion.div key="logistics" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-12">
+                 <button onClick={() => setStep(0)} className="text-[10px] text-text-dim uppercase tracking-widest hover:text-white flex items-center gap-1 font-bold">
+                    <ChevronLeft className="w-3 h-3" /> Back to Config
+                 </button>
+                 
+                 {logistics === 'pickup' && (
+                    <section>
+                       <div className="mb-8">
+                        <h2 className="text-3xl font-light mb-1">Pickup Information</h2>
+                        <p className="text-text-dim text-sm">Where should our courier collect your pairs?</p>
+                      </div>
+                      <div className="luxury-card flex items-center gap-4 py-4 px-6 border-gold/30">
+                         <MapPin className="text-gold w-5 h-5 flex-shrink-0" />
+                         <input 
+                            type="text" 
+                            placeholder="Street Address, City, Postal Code"
+                            className="bg-transparent border-none flex-1 focus:ring-0 text-white placeholder:text-text-dim py-2"
+                            value={address}
+                            onChange={(e) => setAddress(e.target.value)}
+                         />
+                      </div>
+                    </section>
+                 )}
+
+                 <section>
+                    <div className="mb-6 md:mb-8">
+                      <h2 className="text-2xl md:text-3xl font-light mb-1">Loyalty & Privileges</h2>
+                      <p className="text-text-dim text-xs md:text-sm">Apply exclusive vouchers or redeem points.</p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
+                       <div className="luxury-card space-y-4 flex flex-col justify-between">
+                          <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Discount Privilege</p>
+                          <div className="flex gap-2">
+                             <input 
+                                type="text" 
+                                placeholder="PROMO CODE" 
+                                className="bg-luxury-black border border-luxury-border flex-1 rounded p-3 text-[11px] uppercase tracking-widest focus:border-gold focus:outline-none placeholder:text-white/10"
+                                value={couponCode}
+                                onChange={(e) => setCouponCode(e.target.value)}
+                             />
+                             <Button size="md" onClick={applyCoupon} variant="outline" className="px-4">Apply</Button>
+                          </div>
+                       </div>
+                       <div className="luxury-card space-y-4 flex flex-col justify-between">
+                          <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Point Redemption</p>
+                          <div className="flex items-center justify-between">
+                             <div className="space-y-1">
+                                <p className="text-xs">Balance: <span className="text-gold font-bold">{profile?.loyaltyPoints || 0}</span></p>
+                                <p className="text-[10px] text-text-dim">Available savings: {formatCurrency(Math.floor((profile?.loyaltyPoints || 0) / 100) * 10)}</p>
+                             </div>
+                             <button 
+                                onClick={() => setRedeemPoints(!redeemPoints)} 
+                                className={cn("w-10 h-5 md:w-12 md:h-6 rounded-full relative transition-all duration-300 border", redeemPoints ? "bg-gold border-gold shadow-[0_0_15px_rgba(212,175,55,0.2)]" : "bg-luxury-black border-luxury-border")}
+                             >
+                                <div className={cn("w-3 h-3 md:w-4 md:h-4 rounded-full absolute top-[3.5px] md:top-[3px] transition-all duration-300", redeemPoints ? "left-6 md:left-7 bg-luxury-black" : "left-1 bg-white/20")} />
+                             </button>
+                          </div>
+                       </div>
+                    </div>
+                 </section>
+
+                 <div className="flex justify-end pt-6">
+                   <Button size="lg" onClick={() => setStep(2)} disabled={logistics === 'pickup' && !address.trim()} className="rounded-none px-12">
+                     Review Manifest
+                   </Button>
+                 </div>
+              </motion.div>
+            ) : step === 2 ? (
+              <motion.div key="review" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-12">
+                 <button onClick={() => setStep(1)} className="text-[10px] text-text-dim uppercase tracking-widest hover:text-white flex items-center gap-1 font-bold">
+                    <ChevronLeft className="w-3 h-3" /> Edit Details
+                 </button>
+                                <div className="text-center space-y-4 mb-10">
+                    <h2 className="text-3xl md:text-5xl font-serif">Final Review</h2>
+                    <p className="text-text-dim uppercase tracking-[0.3em] text-[8px] md:text-[10px] font-bold">CONFIRM YOUR RESTORATION PARAMETERS</p>
+                 </div>
+
+                 <div className="flex flex-col lg:grid lg:grid-cols-[1fr_350px] gap-8 md:gap-10">
+                    <div className="space-y-6 md:space-y-8 order-2 lg:order-1">
+                       <div className="luxury-card">
+                          <h4 className="text-[10px] uppercase tracking-widest text-text-dim mb-6 font-bold">Services Selection</h4>
+                          <div className="space-y-4">
+                             {selectedServices.map(s => (
+                               <div key={s} className="flex justify-between items-center px-1">
+                                  <span className="text-sm font-medium">{AVAILABLE_SERVICES.find(as => as.id === s)?.name}</span>
+                                  <span className="text-gold text-xs font-bold">{formatCurrency(AVAILABLE_SERVICES.find(as => as.id === s)?.pricePerShoe || 0)} / pair</span>
+                               </div>
+                             ))}
+                             {customService && (
+                               <div className="pt-4 border-t border-luxury-border">
+                                  <p className="text-[10px] text-text-dim uppercase mb-1 font-bold">Special Requirement</p>
+                                  <p className="text-xs italic opacity-80">{customService}</p>
+                               </div>
+                             )}
+                          </div>
+                       </div>
+                       <div className="luxury-card">
+                          <h4 className="text-[10px] uppercase tracking-widest text-text-dim mb-6 font-bold">Logistics Interface</h4>
+                          <div className="flex items-center gap-4">
+                             <div className="w-10 h-10 md:w-12 md:h-12 rounded bg-gold/5 flex items-center justify-center border border-gold/20 flex-shrink-0">
+                               {logistics === 'pickup' ? <Truck className="text-gold w-5 h-5 md:w-6 md:h-6" /> : <Store className="text-gold w-5 h-5 md:w-6 md:h-6" />}
+                             </div>
+                             <div className="flex-1 overflow-hidden">
+                                <p className="text-[10px] md:text-xs uppercase font-bold tracking-widest">{logistics} Method</p>
+                                <p className="text-[10px] md:text-[11px] text-text-dim mt-0.5 truncate">{address || 'Walk-in Boutique Drop-off'}</p>
+                             </div>
+                          </div>
+                       </div>
+
+                       <div className="luxury-card">
+                          <h4 className="text-[10px] uppercase tracking-widest text-text-dim mb-6 font-bold">Secure Settlement</h4>
+                          <div className="flex items-center gap-4">
+                             <div className="w-10 h-10 md:w-12 md:h-12 rounded bg-gold/5 flex items-center justify-center border border-gold/20 flex-shrink-0">
+                               <CreditCard className="text-gold w-5 h-5 md:w-6 md:h-6" />
+                             </div>
+                             <div className="flex-1">
+                                <p className="text-[10px] md:text-xs uppercase font-bold tracking-widest flex items-center gap-2">
+                                  Chapa Payment Gateway
+                                  <span className="text-[8px] bg-gold text-luxury-black px-1 rounded">SECURE</span>
+                                </p>
+                                <p className="text-[10px] md:text-[11px] text-text-dim mt-0.5">Redirecting to Chapa secure checkout upon confirmation.</p>
+                             </div>
+                          </div>
+                       </div>
+                    </div>
+
+                    <div className="luxury-card flex flex-col justify-between bg-gold/5 border-gold/30 p-8 order-1 lg:order-2">
+                       <div className="space-y-6">
+                          <h4 className="text-[10px] uppercase tracking-widest text-text-dim mb-8 font-bold text-center border-b border-gold/20 pb-4">Manifest Valuation</h4>
+                          <div className="space-y-4">
+                             <div className="flex justify-between text-xs md:text-sm text-text-dim">
+                                <span>Restoration Fee ({quantity}x)</span>
+                                <span>{formatCurrency(subtotal)}</span>
+                             </div>
+                             {logisticsFee > 0 && (
+                               <div className="flex justify-between text-xs md:text-sm text-text-dim">
+                                  <span>Logistics Logistics</span>
+                                  <span>{formatCurrency(1000)}</span>
+                               </div>
+                             )}
+                             {(referralDiscount > 0 || loyaltySavings > 0) && (
+                               <div className="flex justify-between text-xs md:text-sm text-green-500 font-bold border-t border-luxury-border pt-4">
+                                  <span className="flex items-center gap-1 uppercase tracking-tighter">Savings Applied</span>
+                                  <span>-{formatCurrency(referralDiscount + loyaltySavings)}</span>
+                                </div>
+                             )}
+                          </div>
+                       </div>
+                       <div className="pt-8 md:pt-10 border-t border-luxury-border mt-10">
+                          <div className="flex justify-between items-end mb-8">
+                             <div>
+                                <p className="text-[8px] md:text-[10px] text-text-dim uppercase font-bold mb-1 tracking-widest">Grand Total</p>
+                                <p className="text-4xl md:text-6xl font-serif text-gold leading-none">{formatCurrency(total)}</p>
+                             </div>
+                             <div className="text-right">
+                                <p className="text-[8px] md:text-[10px] text-text-dim uppercase font-bold mb-1 tracking-widest">Earned</p>
+                                <p className="text-base md:text-lg font-serif text-gold">+{Math.floor(total)} <span className="text-[8px] md:text-[10px] font-sans font-bold uppercase">Points</span></p>
+                             </div>
+                          </div>
+                          <Button size="lg" onClick={placeOrder} isLoading={isSubmitting} className="w-full rounded-none">
+                            {paymentStatus === 'initializing' ? 'Securing Connection...' : 'Confirm & Pay with Chapa'}
+                          </Button>
+                       </div>
+                    </div>
+                 </div>
+              </motion.div>
+            ) : (
+              <motion.div key="success" initial={{ scale: 0.98, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center py-20 px-10">
+                 <div className="inline-flex items-center justify-center w-24 h-24 rounded-full border border-gold/30 bg-gold/5 mb-10">
+                    <CheckCircle2 className="w-10 h-10 text-gold" />
+                 </div>
+                 <h2 className="text-4xl md:text-6xl font-serif mb-6 tracking-tight">Manifest Received</h2>
+                 <p className="text-text-dim max-w-md mx-auto mb-16 italic text-xs md:text-sm leading-relaxed font-light">
+                   Our specialists have logged your request. We will reach out shortly to coordinate the handcraft process.
+                 </p>
+                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                    {deferredPrompt && (
+                      <Button variant="outline" onClick={installPWA} className="rounded-none px-12 gap-2">
+                        <Download className="w-4 h-4" /> Install App
+                      </Button>
+                    )}
+                    <Button variant="outline" onClick={() => setView('history')} className="rounded-none px-12">View Archive</Button>
+                    <Button onClick={() => { setStep(0); setView('home'); setQuantity(1); setSelectedServices(['deep-cleaning']); setAddress(''); setCouponCode(''); setDiscountValue(0); setRedeemPoints(false); }} className="rounded-none px-12">New Engagement</Button>
+                 </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </main>
+
+      <footer className="h-16 border-t border-luxury-border flex items-center justify-center text-[10px] text-text-dim uppercase tracking-[0.4em] font-medium">
+         © 2026 ሊ STRO PRESERVATION ATELIER
+      </footer>
+    </div>
+  );
+}
+
+function ReviewForm({ orderId, onSubmit }: { orderId: string, onSubmit: (oid: string, r: number, revText: string) => void }) {
+  const [rating, setRating] = useState(0);
+  const [reviewText, setReviewText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  if (submitted) return <p className="text-gold text-xs italic">Review submitted. Thank you for your feedback.</p>;
+
+  return (
+    <div className="space-y-6">
+      <StarRating rating={rating} setRating={setRating} interactive />
+      <textarea 
+        className="w-full bg-transparent border border-luxury-border rounded p-4 text-xs placeholder:opacity-30 focus:outline-none focus:border-gold italic transition-all" 
+        style={{ backgroundColor: 'color-mix(in srgb, var(--bg-main), transparent 95%)', color: 'var(--text-main)' }}
+        placeholder="Share your experience (optional)"
+        rows={3}
+        value={reviewText}
+        onChange={(e) => setReviewText(e.target.value)}
+      />
+      <Button 
+        size="md" 
+        className="rounded-none w-full"
+        disabled={rating === 0 || loading} 
+        onClick={async () => {
+          setLoading(true);
+          await onSubmit(orderId, rating, reviewText);
+          setLoading(false);
+          setSubmitted(true);
+        }}
+      >
+        Submit Evaluation
+      </Button>
+    </div>
+  );
+}

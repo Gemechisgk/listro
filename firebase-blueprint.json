@@ -1,0 +1,65 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "loyaltyPoints": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "createdAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Shoe cleaning order details",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "logistics": { "type": "string", "enum": ["drop-off", "pickup"] },
+        "address": { "type": "string" },
+        "location": {
+          "type": "object",
+          "properties": {
+            "lat": { "type": "number" },
+            "lng": { "type": "number" }
+          }
+        },
+        "services": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "customService": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "confirmed", "cleaning", "drying", "quality-check", "ready", "completed", "cancelled"] },
+        "paymentStatus": { "type": "string", "enum": ["unpaid", "pending", "success", "failed"] },
+        "tx_ref": { "type": "string" },
+        "shoeImages": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "estimatedCost": { "type": "number" },
+        "discountApplied": { "type": "number" },
+        "pointsEarned": { "type": "number" },
+        "rating": { "type": "number" },
+        "review": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "quantity", "logistics", "services", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "orders/{orderId}": {
+      "schema": "Order",
+      "description": "Customer service orders"
+    }
+  }
+}
