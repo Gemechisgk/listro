@@ -369,8 +369,10 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
+      setLoading(false);
+      
       if (u) {
-        // If we have a user, ensure walkthrough is hidden
+        // Logged in: Hide walkthrough immediately
         setWalkthroughStep(null);
         
         const userRef = doc(db, 'users', u.uid);
@@ -388,16 +390,7 @@ export default function App() {
           await setDoc(userRef, newProfile);
           setProfile(newProfile as UserProfile);
         }
-      } else {
-        // Only show walkthrough if NO user is found AFTER the splash completes
-        // We use a small delay to ensure onAuthStateChanged had time to find the user
-        setTimeout(() => {
-          if (!auth.currentUser) {
-            setWalkthroughStep(1);
-          }
-        }, 100);
       }
-      setLoading(false);
     });
 
     return () => {
@@ -406,6 +399,15 @@ export default function App() {
     };
   }, []);
 
+  // Trigger walkthrough only for guests who haven't seen it this session
+  useEffect(() => {
+    if (!loading && !showSplash && !user) {
+      const sessionDismissed = sessionStorage.getItem('walkthroughDismissed');
+      if (!sessionDismissed && walkthroughStep === null) {
+        setWalkthroughStep(1);
+      }
+    }
+  }, [loading, showSplash, user]);
   useEffect(() => {
     if (!user) return;
     const q = query(
@@ -618,7 +620,7 @@ export default function App() {
     ];
 
     const finishWalkthrough = () => {
-      localStorage.setItem('hasSeenWalkthrough', 'true');
+      sessionStorage.setItem('walkthroughDismissed', 'true');
       setWalkthroughStep(null);
     };
 
