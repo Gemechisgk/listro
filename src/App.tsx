@@ -359,11 +359,11 @@ export default function App() {
   useEffect(() => {
     const splashTimer = setTimeout(() => {
       setShowSplash(false);
-      const hasSeenWalkthrough = localStorage.getItem('hasSeenWalkthrough');
-      if (!hasSeenWalkthrough) {
+      // If user is not authenticated after splash, show walkthrough every time
+      if (!auth.currentUser) {
         setWalkthroughStep(1);
       }
-    }, 2500);
+    }, 5500);
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
@@ -600,7 +600,7 @@ export default function App() {
     const steps = [
       { title: 'walkthroughTitle1', desc: 'walkthroughDesc1', img: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=1000' },
       { title: 'walkthroughTitle2', desc: 'walkthroughDesc2', img: 'https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?auto=format&fit=crop&q=80&w=1000' },
-      { title: 'walkthroughTitle3', desc: 'walkthroughDesc3', img: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?auto=format&fit=crop&q=80&w=1000' }
+      { title: 'walkthroughTitle3', desc: 'walkthroughDesc3', img: 'https://thumbor-gc.tomandco.uk/unsafe/513x513/filters:upscale():fill(white):sharpen(0)/https://www.johnlobb.com/static/uploads/sites/5/2019/10/care-soft-brush.jpg' }
     ];
 
     const finishWalkthrough = () => {
