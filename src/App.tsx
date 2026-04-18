@@ -18,7 +18,7 @@ import {
 import axios from 'axios';
 import { nanoid } from 'nanoid';
 import { 
-  signInWithRedirect, GoogleAuthProvider, onAuthStateChanged, signOut, User, getRedirectResult 
+  createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut, User 
 } from 'firebase/auth';
 import { 
   collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, doc, updateDoc, getDoc, setDoc, increment, arrayUnion 
@@ -284,6 +284,14 @@ export default function App() {
   const [heroVideoLoaded, setHeroVideoLoaded] = useState(false);
   const [heroVideoError, setHeroVideoError] = useState(false);
 
+  // Auth Form State
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+
   useEffect(() => {
     // Fallback to hide loader if video takes too long
     const timer = setTimeout(() => {
@@ -357,12 +365,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Handle redirect result specifically for mobile/Vercel
-    getRedirectResult(auth).catch((error) => {
-      console.error('Redirect Error:', error);
-      setLoading(false);
-    });
-
     const splashTimer = setTimeout(() => {
       setShowSplash(false);
     }, 5500);
@@ -372,9 +374,7 @@ export default function App() {
       setLoading(false);
       
       if (u) {
-        // Logged in: Hide walkthrough immediately
         setWalkthroughStep(null);
-        
         const userRef = doc(db, 'users', u.uid);
         const d = await getDoc(userRef);
         if (d.exists()) {
@@ -459,11 +459,22 @@ export default function App() {
   const loyaltySavings = redeemPoints ? Math.min(subtotal - referralDiscount, (profile?.loyaltyPoints || 0) / 10) : 0;
   const total = Math.max(0, subtotal - referralDiscount - loyaltySavings) + logisticsFee;
 
-  const handleLogin = async () => {
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setIsAuthLoading(true);
     try {
-      await signInWithRedirect(auth, new GoogleAuthProvider());
-    } catch (error) {
-      console.error('Login failed:', error);
+      if (authMode === 'signup') {
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(userCredential.user, { displayName });
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+    } catch (error: any) {
+      console.error('Auth Error:', error);
+      setAuthError(t('invalidAuth'));
+    } finally {
+      setIsAuthLoading(false);
     }
   };
 
@@ -673,17 +684,94 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen relative overflow-hidden px-6 text-center">
-        <div className="absolute inset-0 grayscale opacity-10">
-          <img src="https://images.unsplash.com/photo-1623945417032-47864f199320?auto=format&fit=crop&q=80&w=1920&h=1080" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+      <div className="flex flex-col items-center justify-center min-h-screen bg-luxury-black relative overflow-hidden px-6">
+        <div className="absolute top-0 left-0 w-full h-full opacity-20 pointer-events-none">
+          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-gold/20 rounded-full blur-[120px]" />
+          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold/10 rounded-full blur-[120px]" />
         </div>
-        <div className="relative z-10 max-w-sm">
-          <h1 className="font-serif text-6xl mb-4 text-gold tracking-[0.2em]">{t('brand')}</h1>
-          <p className="text-text-dim mb-12 tracking-widest font-light text-xs uppercase italic">{t('tagline')}</p>
-          <Button onClick={handleLogin} size="lg" className="w-full">
-            {t('authenticate')}
-          </Button>
-        </div>
+
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md relative z-10"
+        >
+          <div className="flex flex-col items-center mb-12">
+            <div className="w-20 h-20 p-3 bg-gold/5 rounded-full border border-gold/20 flex items-center justify-center mb-6">
+               <img src="/asset/shiner-logo.svg" alt="Listro" className="w-12 h-12 object-contain" />
+            </div>
+            <h1 className="text-3xl font-serif text-white tracking-[0.2em] uppercase mb-2">ሊ-stro</h1>
+            <p className="text-text-dim text-[10px] uppercase tracking-widest">{t(authMode === 'login' ? 'authenticating' : 'creatingAccount')}</p>
+          </div>
+
+          <div className="luxury-card p-10 bg-luxury-gray/40 backdrop-blur-xl border-luxury-border">
+            <h2 className="text-xl font-serif text-white mb-8 text-center tracking-wide">{t(authMode === 'login' ? 'login' : 'signup')}</h2>
+            
+            <form onSubmit={handleAuth} className="space-y-6">
+              {authMode === 'signup' && (
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold ml-1">{t('fullName')}</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    className="w-full bg-luxury-black/50 border border-luxury-border rounded-xl px-4 py-3 text-white focus:border-gold outline-none transition-all"
+                  />
+                </div>
+              )}
+              
+              <div className="space-y-2">
+                <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold ml-1">{t('email')}</label>
+                <input 
+                  type="email" 
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-luxury-black/50 border border-luxury-border rounded-xl px-4 py-3 text-white focus:border-gold outline-none transition-all"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold ml-1">{t('password')}</label>
+                <input 
+                  type="password" 
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-luxury-black/50 border border-luxury-border rounded-xl px-4 py-3 text-white focus:border-gold outline-none transition-all"
+                />
+              </div>
+
+              {authError && <p className="text-red-500 text-xs text-center font-medium">{authError}</p>}
+
+              <Button 
+                type="submit" 
+                isLoading={isAuthLoading} 
+                className="w-full py-4 text-xs tracking-[0.3em] font-black rounded-xl"
+              >
+                {t(authMode === 'login' ? 'login' : 'signup')}
+              </Button>
+            </form>
+
+            <div className="mt-10 pt-8 border-t border-luxury-border text-center">
+              <p className="text-text-dim text-xs mb-4">
+                {t(authMode === 'login' ? 'noAccount' : 'alreadyAccount')}
+              </p>
+              <button 
+                onClick={() => {
+                  setAuthMode(authMode === 'login' ? 'signup' : 'login');
+                  setAuthError('');
+                }}
+                className="text-gold text-[10px] uppercase tracking-[0.3em] font-black hover:opacity-80 transition-opacity"
+              >
+                {t(authMode === 'login' ? 'signup' : 'login')}
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
         {/* Image Zoom Overlay */}
         <AnimatePresence>
