@@ -111,7 +111,6 @@ const AddressAutocomplete = ({
 }: { 
   onSelect: (address: string, coords?: { lat: number, lng: number }) => void, 
   defaultValue?: string,
-  isLoaded: boolean,
   t: (key: any) => string
 }) => {
   const [value, setValue] = useState(defaultValue);
@@ -248,7 +247,9 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [step, setStep] = useState(0); // 0: Config/Summary, 1: Logistics, 2: Final Review, 3: Success
+  const [showSplash, setShowSplash] = useState(true);
+  const [walkthroughStep, setWalkthroughStep] = useState<number | null>(null);
+  const [step, setStep] = useState(0); 
   const [view, setView] = useState<'home' | 'history'>('home');
   const [orders, setOrders] = useState<Order[]>([]);
 
@@ -344,7 +345,7 @@ export default function App() {
       const unsubscribe = onMessage(messaging, (payload) => {
         if (payload.notification) {
           setActiveNotification({
-            title: payload.notification.title || 'ሊ STRO Update',
+            title: payload.notification.title || 'ሊ-STRO Update',
             body: payload.notification.body || ''
           });
           // Auto-hide after 10 seconds
@@ -356,22 +357,28 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const splashTimer = setTimeout(() => {
+      setShowSplash(false);
+      const hasSeenWalkthrough = localStorage.getItem('hasSeenWalkthrough');
+      if (!hasSeenWalkthrough) {
+        setWalkthroughStep(1);
+      }
+    }, 2500);
+
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
-        // Fetch or create profile
         const userRef = doc(db, 'users', u.uid);
-        const userDoc = await getDoc(userRef);
-        if (userDoc.exists()) {
-          setProfile(userDoc.data() as UserProfile);
+        const d = await getDoc(userRef);
+        if (d.exists()) {
+          setProfile(d.data() as UserProfile);
         } else {
           const newProfile = {
             uid: u.uid,
-            email: u.email || '',
-            displayName: u.displayName || '',
+            email: u.email!,
+            displayName: u.displayName || 'Atelier Enthusiast',
             photoURL: u.photoURL || '',
-            loyaltyPoints: 0,
-            createdAt: new Date().toISOString()
+            loyaltyPoints: 0
           };
           await setDoc(userRef, newProfile);
           setProfile(newProfile as UserProfile);
@@ -379,7 +386,10 @@ export default function App() {
       }
       setLoading(false);
     });
-    return unsubscribe;
+    return () => {
+      clearTimeout(splashTimer);
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -559,6 +569,88 @@ export default function App() {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen">
         <Loader2 className="w-12 h-12 text-gold animate-spin" />
+      </div>
+    );
+  }
+
+  if (showSplash) {
+    return (
+      <div className="fixed inset-0 bg-luxury-black flex items-center justify-center z-[100]">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.8 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 1.2 }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+          className="flex flex-col items-center gap-6"
+        >
+          <div className="w-24 h-24 md:w-32 md:h-32 p-4 bg-gold/5 rounded-full border border-gold/20 flex items-center justify-center relative overflow-hidden group">
+            <div className="absolute inset-0 bg-gold/10 animate-pulse" />
+            <img src="/asset/shiner-logo.svg" alt="Listro" className="w-16 h-16 md:w-20 md:h-20 object-contain relative z-10" />
+          </div>
+          <div className="text-center">
+            <h1 className="text-3xl md:text-4xl font-serif text-white tracking-[0.2em] uppercase mb-2">ሊ-stro</h1>
+            <div className="h-0.5 w-12 bg-gold mx-auto rounded-full" />
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (walkthroughStep !== null) {
+    const steps = [
+      { title: 'walkthroughTitle1', desc: 'walkthroughDesc1', img: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=1000' },
+      { title: 'walkthroughTitle2', desc: 'walkthroughDesc2', img: 'https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?auto=format&fit=crop&q=80&w=1000' },
+      { title: 'walkthroughTitle3', desc: 'walkthroughDesc3', img: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?auto=format&fit=crop&q=80&w=1000' }
+    ];
+
+    const finishWalkthrough = () => {
+      localStorage.setItem('hasSeenWalkthrough', 'true');
+      setWalkthroughStep(null);
+    };
+
+    return (
+      <div className="fixed inset-0 bg-luxury-black z-50 flex flex-col">
+        <div className="relative flex-1">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={walkthroughStep}
+              initial={{ opacity: 0, x: 50 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -50 }}
+              className="absolute inset-0"
+            >
+              <div className="absolute inset-0 bg-gradient-to-t from-luxury-black via-luxury-black/40 to-transparent z-10" />
+              <img 
+                src={steps[walkthroughStep - 1].img} 
+                className="w-full h-full object-cover grayscale opacity-60" 
+                alt="Walkthrough"
+              />
+              <div className="absolute bottom-32 left-8 right-8 z-20">
+                <p className="text-gold text-[10px] uppercase tracking-[0.4em] font-bold mb-4">Step 0{walkthroughStep}</p>
+                <h2 className="text-4xl md:text-5xl font-serif text-white mb-4 leading-tight">{t(steps[walkthroughStep - 1].title as any)}</h2>
+                <p className="text-text-dim text-sm md:text-base max-w-md leading-relaxed">{t(steps[walkthroughStep - 1].desc as any)}</p>
+              </div>
+            </motion.div>
+          </AnimatePresence>
+        </div>
+
+        <div className="p-8 pb-12 bg-luxury-black/90 backdrop-blur-xl border-t border-luxury-border flex items-center justify-between">
+          <div className="flex gap-1.5">
+            {[1, 2, 3].map(s => (
+              <div key={s} className={cn("h-1 rounded-full transition-all duration-500", s === walkthroughStep ? "w-8 bg-gold" : "w-2 bg-luxury-border")} />
+            ))}
+          </div>
+          <div className="flex gap-4">
+            {walkthroughStep < 3 ? (
+              <>
+                <button onClick={finishWalkthrough} className="text-[10px] text-text-dim uppercase tracking-widest font-bold hover:text-white transition-colors">{t('skip')}</button>
+                <Button onClick={() => setWalkthroughStep(walkthroughStep + 1)} className="px-8 rounded-full">{t('next')} <ArrowRight className="w-4 h-4" /></Button>
+              </>
+            ) : (
+              <Button onClick={finishWalkthrough} className="px-12 rounded-full shadow-[0_0_20px_rgba(212,175,55,0.2)]">{t('getStarted')}</Button>
+            )}
+          </div>
+        </div>
       </div>
     );
   }
@@ -1155,13 +1247,14 @@ export default function App() {
                       >
                          <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">{t('pickupInformation')}</p>
                          <AddressAutocomplete 
-                            onSelect={(addr, coords) => {
-                              setAddress(addr);
-                              if (coords) setAddressCoords(coords);
-                              else setAddressCoords(null);
-                            } }
-                            defaultValue={address}
-                            t={t} isLoaded={false}                        />
+                          onSelect={(addr, coords) => {
+                            setAddress(addr);
+                            if (coords) setAddressCoords(coords);
+                            else setAddressCoords(null);
+                          }} 
+                          defaultValue={address} 
+                          t={t}
+                        />
                       </motion.div>
                     )}
                   </AnimatePresence>

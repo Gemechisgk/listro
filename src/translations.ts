@@ -1,6 +1,6 @@
 export const TRANSLATIONS = {
   en: {
-    brand: "ሊ stro",
+    brand: "ሊ-stro",
     tagline: "Excellence in every fiber.",
     authenticate: "Authenticate",
     loyaltyPoints: "Loyalty Points",
@@ -114,9 +114,18 @@ export const TRANSLATIONS = {
     couponApplied: "Coupon applied! 20% off.",
     invalidCoupon: "Invalid coupon code. Try LISTRO20",
     back: "Back",
+    walkthroughTitle1: "Seamless Booking",
+    walkthroughDesc1: "Choose from our premium services and document your footwear with ease.",
+    walkthroughTitle2: "Concierge Logistics",
+    walkthroughDesc2: "Select between walk-in boutique drop-off or elite courier pickup.",
+    walkthroughTitle3: "Masterful Restoration",
+    walkthroughDesc3: "Track every step of the process and earn exclusive loyalty privileges.",
+    getStarted: "Get Started",
+    next: "Next",
+    skip: "Skip",
   },
   am: {
-    brand: "ሊ stro",
+    brand: "ሊ-stro",
     tagline: "በእያንዳንዱ ፋይበር ውስጥ ልቅነት።",
     authenticate: "ግባ",
     loyaltyPoints: "የታማኝነት ነጥቦች",
@@ -230,5 +239,14 @@ export const TRANSLATIONS = {
     couponApplied: "ኩፖን ተተግብሯል! 20% ቅናሽ።",
     invalidCoupon: "የማይሰራ የኩፖን ኮድ። LISTRO20 ይሞክሩ",
     back: "ተመለስ",
+    walkthroughTitle1: "ቀለል ያለ ቦታ ማስያዝ",
+    walkthroughDesc1: "ከፕሪሚየም አገልግሎቶቻችን ይምረጡ እና ጫማዎን በቀላሉ ይመዝግቡ።",
+    walkthroughTitle2: "የሎጂስቲክስ አገልግሎት",
+    walkthroughDesc2: "በአካል ቀርቦ ማስረከብ ወይም በባለሙያ መረከቢያ መካከል ይምረጡ።",
+    walkthroughTitle3: "ጥበባዊ እድሳት",
+    walkthroughDesc3: "እያንዳንዱን የእድሳት ሂደት ይከታተሉ እና ልዩ የታማኝነት ጥቅሞችን ያግኙ።",
+    getStarted: "ጀምር",
+    next: "ቀጣይ",
+    skip: "ዝለል",
   }
 };
