@@ -18,7 +18,7 @@ import {
 import axios from 'axios';
 import { nanoid } from 'nanoid';
 import { 
-  signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, User 
+  signInWithRedirect, GoogleAuthProvider, onAuthStateChanged, signOut, User 
 } from 'firebase/auth';
 import { 
   collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, doc, updateDoc, getDoc, setDoc, increment, arrayUnion 
@@ -445,7 +445,7 @@ export default function App() {
 
   const handleLogin = async () => {
     try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
+      await signInWithRedirect(auth, new GoogleAuthProvider());
     } catch (error) {
       console.error('Login failed:', error);
     }
