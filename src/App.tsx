@@ -13,7 +13,8 @@ import {
   Camera, Image as ImageIcon, CreditCard, ExternalLink,
   Clock, PackageCheck, Thermometer, Search,
   Sun, Moon, Download, Bell, BellOff, Info,
-  Filter, Calendar, X, Locate
+  Filter, Calendar, X, Locate,
+  Shirt
 } from 'lucide-react';
 import axios from 'axios';
 import { nanoid } from 'nanoid';
@@ -628,8 +629,10 @@ export default function App() {
   if (walkthroughStep !== null) {
     const steps = [
       { title: 'walkthroughTitle1', desc: 'walkthroughDesc1', img: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&q=80&w=1000' },
-      { title: 'walkthroughTitle2', desc: 'walkthroughDesc2', img: 'https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?auto=format&fit=crop&q=80&w=1000' },
-      { title: 'walkthroughTitle3', desc: 'walkthroughDesc3', img: 'https://thumbor-gc.tomandco.uk/unsafe/513x513/filters:upscale():fill(white):sharpen(0)/https://www.johnlobb.com/static/uploads/sites/5/2019/10/care-soft-brush.jpg' }
+      { title: 'walkthroughTitle2', desc: 'walkthroughDesc2', img: 'https://images.unsplash.com/photo-1517677208171-0bc6725a3e60?auto=format&fit=crop&q=80&w=1000' },
+      { title: 'walkthroughTitle3', desc: 'walkthroughDesc3', img: 'https://images.unsplash.com/photo-1545173168-9f1947eebb7f?auto=format&fit=crop&q=80&w=1000' },
+      { title: 'walkthroughTitle4', desc: 'walkthroughDesc4', img: 'https://images.unsplash.com/photo-1489274495757-95c7c837b101?auto=format&fit=crop&q=80&w=1000' },
+      { title: 'walkthroughTitle5', desc: 'walkthroughDesc5', img: 'https://www.insidehook.com/wp-content/uploads/2020/04/0-1.jpg?fit=750%2C500' }
     ];
 
     const finishWalkthrough = () => {
@@ -666,12 +669,12 @@ export default function App() {
 
         <div className="p-8 pb-12 bg-luxury-black/90 backdrop-blur-xl border-t border-luxury-border flex items-center justify-between">
           <div className="flex gap-1.5">
-            {[1, 2, 3].map(s => (
+            {[1, 2, 3, 4, 5].map(s => (
               <div key={s} className={cn("h-1 rounded-full transition-all duration-500", s === walkthroughStep ? "w-8 bg-gold" : "w-2 bg-luxury-border")} />
             ))}
           </div>
           <div className="flex gap-4">
-            {walkthroughStep < 3 ? (
+            {walkthroughStep < 5 ? (
               <>
                 <button onClick={finishWalkthrough} className="text-[10px] text-text-dim uppercase tracking-widest font-bold hover:text-white transition-colors">{t('skip')}</button>
                 <Button onClick={() => setWalkthroughStep(walkthroughStep + 1)} className="px-8 rounded-full">{t('next')} <ArrowRight className="w-4 h-4" /></Button>
@@ -687,7 +690,7 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-luxury-black relative overflow-hidden px-6">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-luxury-black relative overflow-hidden px-6 pt-12 pb-12">
         <div className="absolute top-0 left-0 w-full h-full opacity-20 pointer-events-none">
           <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-gold/20 rounded-full blur-[120px]" />
           <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold/10 rounded-full blur-[120px]" />
@@ -698,18 +701,18 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-md relative z-10"
         >
-          <div className="flex flex-col items-center mb-12">
-            <div className="w-20 h-20 p-3 bg-gold/5 rounded-full border border-gold/20 flex items-center justify-center mb-6">
-               <img src="/asset/shiner-logo.svg" alt="Listro" className="w-12 h-12 object-contain" />
+          <div className="flex flex-col items-center mb-8">
+            <div className="w-16 h-16 p-2 bg-gold/5 rounded-full border border-gold/20 flex items-center justify-center mb-4">
+               <img src="/asset/shiner-logo.svg" alt="Listro" className="w-10 h-10 object-contain" />
             </div>
-            <h1 className="text-3xl font-serif text-white tracking-[0.2em] uppercase mb-2">ሊ-stro</h1>
-            <p className="text-text-dim text-[10px] uppercase tracking-widest">{t(authMode === 'login' ? 'authenticating' : 'creatingAccount')}</p>
+            <h1 className="text-2xl font-serif text-white tracking-[0.2em] uppercase mb-1">ሊ-stro</h1>
+            <p className="text-text-dim text-[8px] uppercase tracking-widest">{t(authMode === 'login' ? 'authenticating' : 'creatingAccount')}</p>
           </div>
-
-          <div className="luxury-card p-10 bg-luxury-gray/40 backdrop-blur-xl border-luxury-border">
-            <h2 className="text-xl font-serif text-white mb-8 text-center tracking-wide">{t(authMode === 'login' ? 'login' : 'signup')}</h2>
+ 
+          <div className="luxury-card p-8 bg-luxury-gray/40 backdrop-blur-xl border-luxury-border">
+            <h2 className="text-lg font-serif text-white mb-6 text-center tracking-wide">{t(authMode === 'login' ? 'login' : 'signup')}</h2>
             
-            <form onSubmit={handleAuth} className="space-y-6">
+            <form onSubmit={handleAuth} className="space-y-4">
               {authMode === 'signup' && (
                 <div className="space-y-2">
                   <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold ml-1">{t('fullName')}</label>
@@ -1254,8 +1257,8 @@ export default function App() {
                         category === 'apparel' ? "bg-gold/10 border-gold shadow-[0_0_30px_rgba(212,175,55,0.1)]" : "bg-luxury-gray/10 border-luxury-border opacity-60 hover:opacity-100"
                        )}
                      >
-                        <div className="w-16 h-16 rounded-full bg-luxury-black flex items-center justify-center">
-                           <Plus className={cn("w-8 h-8", category === 'apparel' ? "text-gold" : "text-text-dim")} />
+                        <div className="w-16 h-16 rounded-full bg-luxury-black flex items-center justify-center text-gold">
+                           <Shirt className={cn("w-8 h-8", category === 'apparel' ? "text-gold" : "text-text-dim")} />
                         </div>
                         <span className="text-[10px] uppercase tracking-widest font-black">{t('apparel')}</span>
                      </button>
