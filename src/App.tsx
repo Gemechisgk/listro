@@ -12,7 +12,7 @@ import {
   User as UserIcon, History, Star, Ticket, Gift,
   Camera, Image as ImageIcon, CreditCard, ExternalLink,
   Clock, PackageCheck, Thermometer, Search,
-  Sun, Moon, Download
+  Sun, Moon, Download, Bell, BellOff, Info
 } from 'lucide-react';
 import axios from 'axios';
 import { nanoid } from 'nanoid';
@@ -20,9 +20,14 @@ import {
   signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, User 
 } from 'firebase/auth';
 import { 
-  collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, doc, updateDoc, getDoc, setDoc, increment 
+  collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, doc, updateDoc, getDoc, setDoc, increment, arrayUnion 
 } from 'firebase/firestore';
-import { auth, db } from './lib/firebase';
+import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
+import { auth, db, messaging, getToken, onMessage } from './lib/firebase';
+import usePlacesAutocomplete, {
+  getGeocode,
+  getLatLng,
+} from "use-places-autocomplete";
 import { cn, formatCurrency } from './lib/utils';
 import { AVAILABLE_SERVICES, type LogisticsType, type Order, type UserProfile } from './types';
 
@@ -83,6 +88,121 @@ const StarRating = ({ rating, setRating, interactive = false }: { rating: number
   );
 };
 
+const AddressAutocomplete = ({ 
+  onSelect, 
+  defaultValue = "",
+  isLoaded
+}: { 
+  onSelect: (address: string, coords?: { lat: number, lng: number }) => void, 
+  defaultValue?: string,
+  isLoaded: boolean
+}) => {
+  const {
+    ready,
+    value,
+    suggestions: { status, data },
+    setValue,
+    clearSuggestions,
+  } = usePlacesAutocomplete({
+    requestOptions: {
+      /* Define search scope here */
+    },
+    debounce: 300,
+    defaultValue,
+    initOnMount: isLoaded
+  });
+
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isLoaded && defaultValue) {
+      setValue(defaultValue, false);
+    }
+  }, [isLoaded, defaultValue, setValue]);
+
+  const handleInput = (e: ChangeEvent<HTMLInputElement>) => {
+    setValue(e.target.value);
+    setError(null);
+  };
+
+  const handleSelect = ({ description }: { description: string }) => () => {
+    setValue(description, false);
+    clearSuggestions();
+    setIsVerifying(true);
+    setError(null);
+
+    getGeocode({ address: description })
+      .then((results) => {
+        const { lat, lng } = getLatLng(results[0]);
+        onSelect(description, { lat, lng });
+        setIsVerifying(false);
+      })
+      .catch((err) => {
+        console.error("Geocoding failed:", err);
+        setError("Precision location unavailable. Proceed with manual address?");
+        setIsVerifying(false);
+        // We still allow selection but flag it
+        onSelect(description);
+      });
+  };
+
+  if (!isLoaded) return <div className="h-16 luxury-card animate-pulse border-gold/10" />;
+
+  return (
+    <div className="relative w-full">
+      <div className={cn(
+        "luxury-card flex items-center gap-4 py-4 px-6 border-gold/30 transition-all",
+        error && "border-red-500/50 bg-red-500/5"
+      )}>
+        <MapPin className={cn("text-gold w-5 h-5 flex-shrink-0", isVerifying && "animate-pulse")} />
+        <input
+          value={value}
+          onChange={handleInput}
+          disabled={!ready || isVerifying}
+          placeholder="Street Address, City, Postal Code"
+          className="bg-transparent border-none flex-1 focus:ring-0 text-white placeholder:text-text-dim py-2 outline-none"
+        />
+        {isVerifying && <Loader2 className="w-4 h-4 text-gold animate-spin" />}
+      </div>
+      
+      {error && (
+        <div className="mt-2 flex items-center gap-2 text-[10px] text-red-400 uppercase tracking-widest font-bold px-2">
+          <Info className="w-3 h-3" />
+          {error}
+        </div>
+      )}
+
+      {status === "OK" && (
+        <ul className="absolute z-50 w-full mt-2 luxury-card p-2 border-gold/30 shadow-2xl max-h-60 overflow-y-auto">
+          {data.map((suggestion) => {
+            const {
+              place_id,
+              structured_formatting: { main_text, secondary_text },
+            } = suggestion;
+
+            return (
+              <li
+                key={place_id}
+                onClick={handleSelect(suggestion)}
+                className="p-3 hover:bg-gold/10 cursor-pointer rounded transition-colors group"
+              >
+                <div className="flex items-center gap-3">
+                  <MapPin className="w-4 h-4 text-text-dim group-hover:text-gold" />
+                  <div>
+                    <strong className="text-sm block text-white group-hover:text-gold">{main_text}</strong>
+                    <small className="text-[10px] text-text-dim block">{secondary_text}</small>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+};
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -97,16 +217,70 @@ export default function App() {
   const [selectedServices, setSelectedServices] = useState<string[]>(['deep-cleaning']);
   const [customService, setCustomService] = useState('');
   const [address, setAddress] = useState('');
+  const [addressCoords, setAddressCoords] = useState<{ lat: number, lng: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [shoeImages, setShoeImages] = useState<string[]>([]);
   const [paymentStatus, setPaymentStatus] = useState<'idle' | 'initializing' | 'waiting' | 'failed'>('idle');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const { isLoaded } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
+    libraries: ['places'] as any
+  });
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   
   // Loyalty & Discounts
   const [couponCode, setCouponCode] = useState('');
   const [discountValue, setDiscountValue] = useState(0);
   const [redeemPoints, setRedeemPoints] = useState(false);
+  const [fcmToken, setFcmToken] = useState<string | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
+  const [activeNotification, setActiveNotification] = useState<{title: string, body: string} | null>(null);
+
+  useEffect(() => {
+    if ("Notification" in window) {
+      setNotificationPermission(Notification.permission);
+    }
+  }, []);
+
+  const requestNotificationPermission = async () => {
+    if (!messaging || !user) return;
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission === 'granted') {
+        const token = await getToken(messaging, { 
+          vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY || 'YOUR_PUBLIC_VAPID_KEY_HERE' 
+        });
+        if (token) {
+          setFcmToken(token);
+          // Save token to user profile
+          const userRef = doc(db, 'users', user.uid);
+          await updateDoc(userRef, {
+            fcmTokens: arrayUnion(token)
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Notification permission failed:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (messaging) {
+      const unsubscribe = onMessage(messaging, (payload) => {
+        if (payload.notification) {
+          setActiveNotification({
+            title: payload.notification.title || 'ሊ STRO Update',
+            body: payload.notification.body || ''
+          });
+          // Auto-hide after 10 seconds
+          setTimeout(() => setActiveNotification(null), 10000);
+        }
+      });
+      return unsubscribe;
+    }
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
@@ -261,6 +435,7 @@ export default function App() {
         logistics,
         services: selectedServices,
         address: logistics === 'pickup' ? address : 'Shop Drop-off',
+        addressCoords: logistics === 'pickup' ? addressCoords : null,
         status: 'pending',
         paymentStatus: 'pending',
         tx_ref,
@@ -356,6 +531,16 @@ export default function App() {
           </div>
           <div className="hidden sm:block h-8 w-[1px] bg-luxury-border" />
           <div className="flex items-center gap-2 md:gap-3">
+             {notificationPermission !== 'granted' && (
+               <button 
+                 onClick={requestNotificationPermission}
+                 className="p-2 text-gold/60 hover:text-gold transition-colors relative"
+                 title="Enable Notifications"
+               >
+                 <BellOff className="w-5 h-5" />
+                 <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+               </button>
+             )}
              <div className="text-right">
                 <p className="text-[10px] md:text-xs font-bold uppercase tracking-tighter opacity-80 max-w-[80px] md:max-w-none truncate">{user.displayName}</p>
                 <button onClick={() => setView(view === 'history' ? 'home' : 'history')} className="text-[9px] md:text-[10px] text-gold uppercase tracking-widest hover:underline">
@@ -371,6 +556,31 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* In-App Notification Alert */}
+      <AnimatePresence>
+        {activeNotification && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] w-full max-w-sm px-4"
+          >
+            <div className="luxury-card border-gold bg-gold/5 shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex items-start gap-4 p-4">
+              <div className="w-10 h-10 rounded-full bg-gold/20 flex items-center justify-center flex-shrink-0">
+                <Bell className="text-gold w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <h4 className="text-xs font-bold uppercase tracking-widest text-gold mb-1">{activeNotification.title}</h4>
+                <p className="text-[11px] text-white/80 italic">{activeNotification.body}</p>
+              </div>
+              <button onClick={() => setActiveNotification(null)} className="text-white/20 hover:text-white">
+                <Plus className="w-4 h-4 rotate-45" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <main className={cn("flex-1 p-4 md:p-10 gap-6 md:gap-10", view === 'home' && step < 3 ? "flex flex-col lg:grid lg:grid-cols-[350px_1fr]" : "flex flex-col max-w-4xl mx-auto w-full")}>
         {view === 'home' && step < 3 && (
@@ -667,16 +877,41 @@ export default function App() {
                         <h2 className="text-3xl font-light mb-1">Pickup Information</h2>
                         <p className="text-text-dim text-sm">Where should our courier collect your pairs?</p>
                       </div>
-                      <div className="luxury-card flex items-center gap-4 py-4 px-6 border-gold/30">
-                         <MapPin className="text-gold w-5 h-5 flex-shrink-0" />
-                         <input 
-                            type="text" 
-                            placeholder="Street Address, City, Postal Code"
-                            className="bg-transparent border-none flex-1 focus:ring-0 text-white placeholder:text-text-dim py-2"
-                            value={address}
-                            onChange={(e) => setAddress(e.target.value)}
-                         />
-                      </div>
+                      <AddressAutocomplete 
+                        isLoaded={isLoaded}
+                        onSelect={(addr, coords) => {
+                          setAddress(addr);
+                          if (coords) setAddressCoords(coords);
+                          else setAddressCoords(null);
+                        }} 
+                        defaultValue={address} 
+                      />
+
+                      {addressCoords && isLoaded && (
+                        <div className="h-64 rounded-xl overflow-hidden border border-gold/20 shadow-xl relative group mt-6">
+                          <GoogleMap
+                            mapContainerStyle={{ width: '100%', height: '100%' }}
+                            center={addressCoords}
+                            zoom={15}
+                            options={{
+                              styles: theme === 'dark' ? [
+                                { "elementType": "geometry", "stylers": [{ "color": "#121212" }] },
+                                { "elementType": "labels.text.fill", "stylers": [{ "color": "#D4AF37" }] },
+                                { "elementType": "labels.text.stroke", "stylers": [{ "color": "#121212" }] },
+                                { "featureType": "administrative", "elementType": "geometry.stroke", "stylers": [{ "color": "#2a2a2a" }] },
+                                { "featureType": "landscape.natural", "elementType": "geometry", "stylers": [{ "color": "#1a1a1a" }] },
+                                { "featureType": "poi", "elementType": "geometry", "stylers": [{ "color": "#1a1a1a" }] },
+                                { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#2a2a2a" }] },
+                                { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#0a0a0a" }] }
+                              ] : [],
+                              disableDefaultUI: true,
+                              zoomControl: false,
+                            }}
+                          >
+                            <Marker position={addressCoords} />
+                          </GoogleMap>
+                        </div>
+                      )}
                     </section>
                  )}
 
