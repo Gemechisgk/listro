@@ -1,5 +1,5 @@
 {
-  "name": "ሊ stro | Premium Shoe Care",
+  "name": "ሊ stro",
   "short_name": "ሊ stro",
   "description": "Premium Shoe Cleaning and Preservation Atelier",
   "start_url": "/",
@@ -8,14 +8,16 @@
   "theme_color": "#D4AF37",
   "icons": [
     {
-      "src": "https://picsum.photos/seed/listro192/192/192",
-      "sizes": "192x192",
-      "type": "image/png"
+      "src": "/asset/shiner-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
     },
     {
-      "src": "https://picsum.photos/seed/listro512/512/512",
-      "sizes": "512x512",
-      "type": "image/png"
+      "src": "/asset/shiner-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ],
   "orientation": "portrait"

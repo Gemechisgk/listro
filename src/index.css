@@ -42,7 +42,7 @@
 
 @layer components {
   .step-num {
-    @apply w-7 h-7 border border-current flex items-center justify-center text-[10px] rounded opacity-40;
+    @apply w-7 h-7 border border-current flex items-center justify-center text-[10px] rounded-full opacity-40;
   }
   
   .step-active .step-num {

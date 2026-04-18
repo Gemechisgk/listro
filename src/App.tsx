@@ -52,7 +52,7 @@ const Button = ({
   return (
     <button 
       className={cn(
-        'relative inline-flex items-center justify-center rounded transition-all duration-300 border focus:outline-none focus:ring-1 focus:ring-gold/50 disabled:opacity-50 disabled:cursor-not-allowed',
+        'relative inline-flex items-center justify-center rounded-full transition-all duration-300 border focus:outline-none focus:ring-1 focus:ring-gold/50 disabled:opacity-50 disabled:cursor-not-allowed',
         variants[variant as keyof typeof variants],
         sizes[size as keyof typeof sizes],
         className
@@ -186,7 +186,7 @@ const AddressAutocomplete = ({
               <li
                 key={place_id}
                 onClick={handleSelect(suggestion)}
-                className="p-3 hover:bg-gold/10 cursor-pointer rounded transition-colors group"
+                className="p-3 hover:bg-gold/10 cursor-pointer rounded-full transition-colors group"
               >
                 <div className="flex items-center gap-3">
                   <MapPin className="w-4 h-4 text-text-dim group-hover:text-gold" />
@@ -539,7 +539,7 @@ export default function App() {
         <div className="relative z-10 max-w-sm">
           <h1 className="font-serif text-6xl mb-4 text-gold tracking-[0.2em]">ሊ STRO</h1>
           <p className="text-text-dim mb-12 tracking-widest font-light text-xs uppercase italic">Excellence in every fiber.</p>
-          <Button onClick={handleLogin} size="lg" className="w-full rounded-none">
+          <Button onClick={handleLogin} size="lg" className="w-full">
             Authenticate
           </Button>
         </div>
@@ -648,7 +648,7 @@ export default function App() {
           )}
         </div>
         <div className="flex items-center gap-2 md:gap-8">
-          <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 text-gold/60 hover:text-gold transition-colors">
+          <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 rounded-full text-gold/60 hover:text-gold transition-colors">
             {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
           </button>
           <div className="hidden sm:flex flex-col items-end">
@@ -679,7 +679,7 @@ export default function App() {
              <div className="w-8 h-8 md:w-10 md:h-10 rounded-full border border-luxury-border overflow-hidden flex-shrink-0">
                 <img src={user.photoURL || ''} className="w-full h-full object-cover" />
              </div>
-             <button onClick={() => signOut(auth)} className="p-1 md:p-2 text-white/20 hover:text-white transition-colors">
+             <button onClick={() => signOut(auth)} className="p-1 md:p-2 rounded-full text-white/20 hover:text-white transition-colors">
                 <LogOut className="w-4 h-4 md:w-5 md:h-5" />
              </button>
           </div>
@@ -786,7 +786,7 @@ export default function App() {
                   <button 
                     onClick={() => setIsFilterOpen(!isFilterOpen)}
                     className={cn(
-                      "flex items-center gap-2 px-4 py-2 rounded-lg border transition-all text-[10px] uppercase tracking-widest font-bold",
+                      "flex items-center gap-2 px-4 py-2 rounded-full border transition-all text-[10px] uppercase tracking-widest font-bold",
                       isFilterOpen || filterService !== 'all' || filterStartDate || filterEndDate 
                         ? "border-gold text-gold bg-gold/10" 
                         : "border-luxury-border text-text-dim hover:text-white"
@@ -1053,7 +1053,7 @@ export default function App() {
                     </div>
                   ) : (
                     <video 
-                      src="/input_file_0.mp4"
+                      src="/asset/video_2026-04-18_10-06-50.mp4"
                       autoPlay 
                       loop 
                       muted 
@@ -1085,16 +1085,16 @@ export default function App() {
                     <div className="space-y-3">
                       <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Pairs to Restore</p>
                       <div className="flex items-center gap-6">
-                        <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="w-10 h-10 rounded border border-luxury-border bg-luxury-black hover:bg-gold hover:text-luxury-black transition-all">-</button>
+                        <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="w-10 h-10 rounded-full border border-luxury-border bg-luxury-black hover:bg-gold hover:text-luxury-black transition-all">-</button>
                         <span className="text-2xl md:text-3xl font-serif w-8 text-center">{quantity}</span>
-                        <button onClick={() => setQuantity(quantity + 1)} className="w-10 h-10 rounded border border-luxury-border bg-luxury-black hover:bg-gold hover:text-luxury-black transition-all">+</button>
+                        <button onClick={() => setQuantity(quantity + 1)} className="w-10 h-10 rounded-full border border-luxury-border bg-luxury-black hover:bg-gold hover:text-luxury-black transition-all">+</button>
                       </div>
                     </div>
                     <div className="space-y-3 flex-1 max-w-sm">
                       <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Movement Method</p>
                       <div className="bg-luxury-black p-1.5 rounded-lg border border-luxury-border flex">
-                        <button onClick={() => setLogistics('drop-off')} className={cn("flex-1 py-1.5 rounded text-[10px] md:text-[11px] font-bold uppercase tracking-widest transition-all", logistics === 'drop-off' ? "bg-gold text-luxury-black shadow-lg" : "text-text-dim")}>Drop-off</button>
-                        <button onClick={() => setLogistics('pickup')} className={cn("flex-1 py-1.5 rounded text-[10px] md:text-[11px] font-bold uppercase tracking-widest transition-all", logistics === 'pickup' ? "bg-gold text-luxury-black shadow-lg" : "text-text-dim")}>Pickup</button>
+                        <button onClick={() => setLogistics('drop-off')} className={cn("flex-1 py-1.5 rounded-full text-[10px] md:text-[11px] font-bold uppercase tracking-widest transition-all", logistics === 'drop-off' ? "bg-gold text-luxury-black shadow-lg" : "text-text-dim")}>Drop-off</button>
+                        <button onClick={() => setLogistics('pickup')} className={cn("flex-1 py-1.5 rounded-full text-[10px] md:text-[11px] font-bold uppercase tracking-widest transition-all", logistics === 'pickup' ? "bg-gold text-luxury-black shadow-lg" : "text-text-dim")}>Pickup</button>
                       </div>
                     </div>
                   </div>
@@ -1180,7 +1180,7 @@ export default function App() {
                 </section>
 
                 <div className="flex justify-end pt-6">
-                  <Button size="lg" onClick={() => setStep(1)} disabled={selectedServices.length === 0} className="rounded-none px-12">
+                  <Button size="lg" onClick={() => setStep(1)} disabled={selectedServices.length === 0} className="px-12">
                     Proceed to Logistics
                   </Button>
                 </div>
@@ -1273,7 +1273,7 @@ export default function App() {
                  </section>
 
                  <div className="flex justify-end pt-6">
-                   <Button size="lg" onClick={() => setStep(2)} disabled={logistics === 'pickup' && !address.trim()} className="rounded-none px-12">
+                   <Button size="lg" onClick={() => setStep(2)} disabled={logistics === 'pickup' && !address.trim()} className="px-12">
                      Review Manifest
                    </Button>
                  </div>
@@ -1370,7 +1370,7 @@ export default function App() {
                                 <p className="text-base md:text-lg font-serif text-gold">+{Math.floor(total)} <span className="text-[8px] md:text-[10px] font-sans font-bold uppercase">Points</span></p>
                              </div>
                           </div>
-                          <Button size="lg" onClick={placeOrder} isLoading={isSubmitting} className="w-full rounded-none">
+                          <Button size="lg" onClick={placeOrder} isLoading={isSubmitting} className="w-full">
                             {paymentStatus === 'initializing' ? 'Securing Connection...' : 'Confirm & Pay with Chapa'}
                           </Button>
                        </div>
@@ -1388,12 +1388,12 @@ export default function App() {
                  </p>
                  <div className="flex flex-col sm:flex-row gap-4 justify-center">
                     {deferredPrompt && (
-                      <Button variant="outline" onClick={installPWA} className="rounded-none px-12 gap-2">
+                      <Button variant="outline" onClick={installPWA} className="px-12 gap-2">
                         <Download className="w-4 h-4" /> Install App
                       </Button>
                     )}
-                    <Button variant="outline" onClick={() => setView('history')} className="rounded-none px-12">View Archive</Button>
-                    <Button onClick={() => { setStep(0); setView('home'); setQuantity(1); setSelectedServices(['deep-cleaning']); setAddress(''); setCouponCode(''); setDiscountValue(0); setRedeemPoints(false); }} className="rounded-none px-12">New Engagement</Button>
+                    <Button variant="outline" onClick={() => setView('history')} className="px-12">View Archive</Button>
+                    <Button onClick={() => { setStep(0); setView('home'); setQuantity(1); setSelectedServices(['deep-cleaning']); setAddress(''); setCouponCode(''); setDiscountValue(0); setRedeemPoints(false); }} className="px-12">New Engagement</Button>
                  </div>
               </motion.div>
             )}
@@ -1429,7 +1429,7 @@ function ReviewForm({ orderId, onSubmit }: { orderId: string, onSubmit: (oid: st
       />
       <Button 
         size="md" 
-        className="rounded-none w-full"
+        className="w-full"
         disabled={rating === 0 || loading} 
         onClick={async () => {
           setLoading(true);
