@@ -15,9 +15,10 @@ export interface Order {
   userId: string;
   quantity: number;
   logistics: LogisticsType;
+  category: "footwear" | "apparel";
   services: string[];
   customService?: string;
-  shoeImages?: string[];
+  itemImages?: string[]; // Generic instead of shoeImages
   address?: string;
   location?: {
     lat: number;
@@ -39,34 +40,67 @@ export interface ServiceType {
   id: string;
   name: string;
   description: string;
-  pricePerShoe: number;
+  price: number;
   icon: string;
   image: string;
+  category: "footwear" | "apparel";
 }
 
 export const AVAILABLE_SERVICES: ServiceType[] = [
+  // Footwear
   {
     id: "deep-cleaning",
     name: "Deep Cleaning",
     description: "Intensive hand-scrubbing using organic material-specific solutions.",
-    pricePerShoe: 200,
+    price: 200,
     icon: "Sparkles",
-    image: "https://www.jabchaho.com/public/assets_new/images/services/detail/shoe-cleaning.jpg"
+    image: "https://www.johnlobb.com/static/uploads/sites/5/2019/10/care-soft-brush.jpg",
+    category: "footwear"
   },
   {
     id: "disinfecting",
     name: "Disinfecting",
     description: "UV-C molecular sterilization and hypoallergenic scent infusion.",
-    pricePerShoe: 100,
+    price: 100,
     icon: "ShieldCheck",
-    image: "https://bizimages.withfloats.com/actual/68cd253f903986591cb47968.jpg"
+    image: "https://bizimages.withfloats.com/actual/68cd253f903986591cb47968.jpg",
+    category: "footwear"
   },
   {
     id: "shining",
     name: "Shining & Polish",
     description: "Exhibition-grade wax buffing and hydrophobic edge protection.",
-    pricePerShoe: 150,
+    price: 150,
     icon: "Zap",
-    image: "https://www.theshoecareshop.com/cdn/shop/files/Beginners_poetsen_en_herkleuren.jpg?v=1756384092&width=2400"
+    image: "https://www.theshoecareshop.com/cdn/shop/files/Beginners_poetsen_en_herkleuren.jpg?v=1756384092&width=2400",
+    category: "footwear"
   },
+  // Apparel
+  {
+    id: "dry-cleaning",
+    name: "Dry Cleaning",
+    description: "Eco-friendly solvent-based cleaning for delicate garments and suits.",
+    price: 300,
+    icon: "Shirt",
+    image: "https://images.unsplash.com/photo-1545173168-9f1947eebb7f?auto=format&fit=crop&q=80&w=1000",
+    category: "apparel"
+  },
+  {
+    id: "wash-fold",
+    name: "Wash & Fold",
+    description: "Premium laundering, precision folding, and fresh scent infusion.",
+    price: 150,
+    icon: "Wind",
+    image: "https://images.unsplash.com/photo-1517677208171-0bc6725a3e60?auto=format&fit=crop&q=80&w=1000",
+    category: "apparel"
+  },
+  {
+    id: "express-ironing",
+    name: "Express Ironing",
+    description: "Steam-powered crease removal for professional-grade crispness.",
+    price: 80,
+    icon: "Activity",
+    image: "https://images.unsplash.com/photo-1489274495757-95c7c837b101?auto=format&fit=crop&q=80&w=1000",
+    category: "apparel"
+  }
 ];
