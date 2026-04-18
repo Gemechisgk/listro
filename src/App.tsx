@@ -12,7 +12,8 @@ import {
   User as UserIcon, History, Star, Ticket, Gift,
   Camera, Image as ImageIcon, CreditCard, ExternalLink,
   Clock, PackageCheck, Thermometer, Search,
-  Sun, Moon, Download, Bell, BellOff, Info
+  Sun, Moon, Download, Bell, BellOff, Info,
+  Filter, Calendar, X
 } from 'lucide-react';
 import axios from 'axios';
 import { nanoid } from 'nanoid';
@@ -203,6 +204,8 @@ const AddressAutocomplete = ({
   );
 };
 
+const LIBRARIES: ("places" | "geometry" | "drawing" | "visualization")[] = ['places'];
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -225,7 +228,7 @@ export default function App() {
   const { isLoaded } = useJsApiLoader({
     id: 'google-map-script',
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
-    libraries: ['places'] as any
+    libraries: LIBRARIES
   });
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   
@@ -236,6 +239,43 @@ export default function App() {
   const [fcmToken, setFcmToken] = useState<string | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
   const [activeNotification, setActiveNotification] = useState<{title: string, body: string} | null>(null);
+
+  // History Filtering
+  const [filterService, setFilterService] = useState<string>('all');
+  const [filterStartDate, setFilterStartDate] = useState<string>('');
+  const [filterEndDate, setFilterEndDate] = useState<string>('');
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+  const [heroVideoLoaded, setHeroVideoLoaded] = useState(false);
+  const [heroVideoError, setHeroVideoError] = useState(false);
+
+  useEffect(() => {
+    // Fallback to hide loader if video takes too long
+    const timer = setTimeout(() => {
+      setHeroVideoLoaded(true);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const [heroImageLoaded, setHeroImageLoaded] = useState(false);
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter(order => {
+      const matchService = filterService === 'all' || order.services.includes(filterService);
+      
+      const orderDate = order.createdAt?.toDate ? order.createdAt.toDate() : new Date(order.createdAt);
+      const start = filterStartDate ? new Date(filterStartDate) : null;
+      const end = filterEndDate ? new Date(filterEndDate) : null;
+      
+      if (start) start.setHours(0, 0, 0, 0);
+      if (end) end.setHours(23, 59, 59, 999);
+      
+      const matchDate = (!start || orderDate >= start) && (!end || orderDate <= end);
+      
+      return matchService && matchDate;
+    });
+  }, [orders, filterService, filterStartDate, filterEndDate]);
 
   useEffect(() => {
     if ("Notification" in window) {
@@ -442,7 +482,7 @@ export default function App() {
         estimatedCost: total,
         discountApplied: referralDiscount + loyaltySavings,
         pointsEarned: pointsToEarn,
-        shoeImages: shoeImages.map((_, i) => `image_${i}.jpg`), // Placeholder naming
+        shoeImages, 
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
@@ -494,7 +534,7 @@ export default function App() {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen relative overflow-hidden px-6 text-center">
         <div className="absolute inset-0 grayscale opacity-10">
-          <img src="https://images.unsplash.com/photo-1549298916-b41d501d3772?auto=format&fit=crop&q=80&w=1920&h=1080" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+          <img src="https://images.unsplash.com/photo-1623945417032-47864f199320?auto=format&fit=crop&q=80&w=1920&h=1080" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
         </div>
         <div className="relative z-10 max-w-sm">
           <h1 className="font-serif text-6xl mb-4 text-gold tracking-[0.2em]">ሊ STRO</h1>
@@ -503,6 +543,95 @@ export default function App() {
             Authenticate
           </Button>
         </div>
+
+        {/* Image Zoom Overlay */}
+        <AnimatePresence>
+          {zoomedImage && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setZoomedImage(null)}
+              className="fixed inset-0 z-[110] bg-luxury-black/95 backdrop-blur-2xl flex items-center justify-center p-4 md:p-12 cursor-zoom-out"
+            >
+              <div className="absolute top-0 right-0 p-6">
+                <button className="text-text-dim hover:text-white transition-colors">
+                  <X className="w-8 h-8" />
+                </button>
+              </div>
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="relative max-w-5xl max-h-full aspect-square md:aspect-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <img 
+                  src={zoomedImage} 
+                  className="w-full h-full object-contain rounded-lg shadow-[0_0_50px_rgba(0,0,0,0.5)]" 
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-luxury-black/60 px-4 py-2 rounded-full backdrop-blur-md border border-gold/20">
+                  <p className="text-[10px] uppercase tracking-widest text-gold font-bold">Inspect Detail View</p>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Tracking Placeholder Overlay */}
+        <AnimatePresence>
+          {trackingOrder && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[100] bg-luxury-black/90 backdrop-blur-xl flex items-center justify-center p-6"
+            >
+              <div className="luxury-card max-w-lg w-full p-8 border-gold/30 space-y-8 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4">
+                  <button onClick={() => setTrackingOrder(null)} className="text-text-dim hover:text-white transition-colors">
+                    <X className="w-6 h-6" />
+                  </button>
+                </div>
+
+                <div className="text-center space-y-2">
+                  <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Truck className="w-8 h-8 text-gold animate-bounce" />
+                  </div>
+                  <h3 className="text-2xl font-serif">Global Logistics Tracking</h3>
+                  <p className="text-text-dim text-xs uppercase tracking-widest">Order Reference: {trackingOrder.tx_ref || trackingOrder.id?.slice(0, 8)}</p>
+                </div>
+
+                <div className="space-y-6 pt-6">
+                  {[
+                    { title: 'Courier Assigned', desc: 'Elite Mobility Partner confirmed', date: 'In Transit' },
+                    { title: 'Final Inspection', desc: 'Atelier Quality Assurance Passed', date: 'Completed' },
+                    { title: 'Restoration Cycle', desc: 'Precision cleaning and hydration complete', date: 'Completed' }
+                  ].map((step, i) => (
+                    <div key={i} className="flex gap-4 items-start">
+                      <div className="flex flex-col items-center">
+                        <div className={cn("w-3 h-3 rounded-full", i === 0 ? "bg-gold shadow-[0_0_10px_rgba(212,175,55,0.5)]" : "bg-gold/20")} />
+                        {i < 2 && <div className="w-[1px] h-12 bg-luxury-border" />}
+                      </div>
+                      <div>
+                        <p className={cn("text-sm font-bold", i === 0 ? "text-gold" : "text-white")}>{step.title}</p>
+                        <p className="text-[10px] text-text-dim mt-1">{step.desc}</p>
+                        <p className="text-[8px] uppercase tracking-tighter text-gold/50 mt-1">{step.date}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="bg-gold/5 border border-gold/10 p-4 rounded-lg text-center">
+                  <p className="text-[10px] text-text-dim italic">Estimated delivery to Atelier collection point within 48 hours.</p>
+                </div>
+
+                <Button size="md" className="w-full" onClick={() => setTrackingOrder(null)}>Close Tracker</Button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     );
   }
@@ -541,7 +670,7 @@ export default function App() {
                  <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
                </button>
              )}
-             <div className="text-right">
+             <div className="hidden sm:block text-right">
                 <p className="text-[10px] md:text-xs font-bold uppercase tracking-tighter opacity-80 max-w-[80px] md:max-w-none truncate">{user.displayName}</p>
                 <button onClick={() => setView(view === 'history' ? 'home' : 'history')} className="text-[9px] md:text-[10px] text-gold uppercase tracking-widest hover:underline">
                    {view === 'history' ? 'Dashboard' : 'History'}
@@ -652,20 +781,113 @@ export default function App() {
           <AnimatePresence mode="wait">
             {view === 'history' ? (
               <motion.div key="history" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
-                <h2 className="text-3xl font-serif">Mission Archive</h2>
-                {orders.length === 0 ? (
+                <div className="flex justify-between items-center">
+                  <h2 className="text-3xl font-serif">Mission Archive</h2>
+                  <button 
+                    onClick={() => setIsFilterOpen(!isFilterOpen)}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-lg border transition-all text-[10px] uppercase tracking-widest font-bold",
+                      isFilterOpen || filterService !== 'all' || filterStartDate || filterEndDate 
+                        ? "border-gold text-gold bg-gold/10" 
+                        : "border-luxury-border text-text-dim hover:text-white"
+                    )}
+                  >
+                    <Filter className="w-3 h-3" />
+                    {isFilterOpen ? 'Close Filters' : 'Filter Archive'}
+                  </button>
+                </div>
+
+                <AnimatePresence>
+                  {isFilterOpen && (
+                    <motion.div 
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="luxury-card grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        <div className="space-y-2">
+                          <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Service Type</label>
+                          <select 
+                            value={filterService}
+                            onChange={(e) => setFilterService(e.target.value)}
+                            className="w-full bg-luxury-black border border-luxury-border rounded p-3 text-xs text-white focus:border-gold outline-none"
+                          >
+                            <option value="all">All Specialties</option>
+                            {AVAILABLE_SERVICES.map(s => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold">From Date</label>
+                          <div className="relative">
+                            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-gold opacity-50" />
+                            <input 
+                              type="date"
+                              value={filterStartDate}
+                              onChange={(e) => setFilterStartDate(e.target.value)}
+                              className="w-full bg-luxury-black border border-luxury-border rounded p-3 pl-10 text-xs text-white focus:border-gold outline-none [color-scheme:dark]"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold">To Date</label>
+                          <div className="relative">
+                            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-gold opacity-50" />
+                            <input 
+                              type="date"
+                              value={filterEndDate}
+                              onChange={(e) => setFilterEndDate(e.target.value)}
+                              className="w-full bg-luxury-black border border-luxury-border rounded p-3 pl-10 text-xs text-white focus:border-gold outline-none [color-scheme:dark]"
+                            />
+                          </div>
+                        </div>
+                        <div className="md:col-span-3 flex justify-end">
+                           <button 
+                            onClick={() => {
+                              setFilterService('all');
+                              setFilterStartDate('');
+                              setFilterEndDate('');
+                            }}
+                            className="text-[10px] uppercase tracking-widest text-gold hover:underline font-bold flex items-center gap-2"
+                           >
+                              <X className="w-3 h-3" /> Reset Parameters
+                           </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {filteredOrders.length === 0 ? (
                    <div className="luxury-card text-center py-20 space-y-4">
                       <History className="w-12 h-12 text-white/5 mx-auto" />
                       <p className="text-text-dim italic">No previous engagements found.</p>
                    </div>
                 ) : (
                   <div className="grid gap-6">
-                    {orders.map(o => (
+                    {filteredOrders.map(o => (
                       <div key={o.id} className="luxury-card flex flex-col gap-4">
                         <div className="flex justify-between items-start">
                           <div>
                             <p className="text-[10px] uppercase text-text-dim mb-1 font-bold">{o.createdAt?.toDate?.()?.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) || 'Recent Engagement'}</p>
                             <h4 className="font-serif text-lg">{o.quantity} {o.quantity === 1 ? 'Pair' : 'Pairs'} Restoration</h4>
+                            <div className="flex flex-wrap gap-2 mt-3">
+                               {o.services.map(sid => {
+                                  const service = AVAILABLE_SERVICES.find(s => s.id === sid);
+                                  if (!service) return null;
+                                  const Icon = sid === 'deep-cleaning' ? Sparkles : 
+                                              sid === 'disinfecting' ? ShieldCheck : 
+                                              sid === 'shining' ? Zap : Info;
+                                  return (
+                                     <div key={sid} className="flex items-center gap-1.5 text-[8px] uppercase tracking-[0.15em] text-white/50 font-bold bg-white/5 px-2 py-1 rounded border border-white/5">
+                                        <Icon className="w-2.5 h-2.5 text-gold/70" />
+                                        {service.name}
+                                     </div>
+                                  );
+                               })}
+                            </div>
                           </div>
                           <div className="text-right">
                              <span className={cn(
@@ -674,9 +896,58 @@ export default function App() {
                                o.status === 'cancelled' ? "border-red-500/30 text-red-500" :
                                "border-gold/30 text-gold"
                              )}>{o.status.replace('-', ' ')}</span>
-                             <p className="text-gold font-bold mt-2">{formatCurrency(o.estimatedCost)}</p>
-                          </div>
+                              <p className="text-gold font-bold mt-2">{formatCurrency(o.estimatedCost)}</p>
+                              {o.status === 'completed' && (
+                                <button 
+                                  onClick={() => setTrackingOrder(o)}
+                                  className="mt-2 flex items-center gap-1 text-[9px] text-gold uppercase tracking-widest hover:underline font-bold"
+                                >
+                                  <Truck className="w-3 h-3" /> Track Order
+                                </button>
+                              )}
+                           </div>
                         </div>
+
+                        {/* Payment Status Indicator */}
+                        <div className="flex flex-wrap gap-4 items-center">
+                          <div className={cn(
+                            "flex items-center gap-2 px-3 py-1.5 rounded-full text-[9px] uppercase tracking-widest font-bold border",
+                            o.paymentStatus === 'success' ? "bg-green-500/10 border-green-500/30 text-green-500" :
+                            o.paymentStatus === 'failed' ? "bg-red-500/10 border-red-500/30 text-red-500" :
+                            "bg-orange-500/10 border-orange-500/30 text-orange-500"
+                          )}>
+                            {o.paymentStatus === 'success' ? <CheckCircle2 className="w-3 h-3" /> :
+                             o.paymentStatus === 'failed' ? <BellOff className="w-3 h-3" /> :
+                             <CreditCard className="w-3 h-3" />}
+                            Payment: {o.paymentStatus || 'Pending'}
+                          </div>
+                          
+                          {o.paymentStatus === 'success' && o.tx_ref && (
+                            <div className="flex items-center gap-2 text-[10px] text-text-dim italic">
+                              <span className="font-bold uppercase tracking-tighter not-italic text-[8px] opacity-50">Ref:</span>
+                              {o.tx_ref}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Order Photos */}
+                        {o.shoeImages && o.shoeImages.length > 0 && (
+                          <div className="pt-2">
+                             <p className="text-[9px] uppercase tracking-widest text-text-dim mb-3 font-bold opacity-50">Archived Photography</p>
+                             <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+                                {o.shoeImages.map((img, i) => (
+                                   <div 
+                                      key={i} 
+                                      onClick={() => setZoomedImage(img)}
+                                      className="w-20 h-20 flex-shrink-0 rounded-lg border border-luxury-border overflow-hidden cursor-zoom-in hover:border-gold/50 transition-all hover:scale-105 active:scale-95 group relative"
+                                   >
+                                      <img src={img} className="w-full h-full object-cover transition-all" referrerPolicy="no-referrer" />
+                                      <div className="absolute inset-0 bg-gold/0 group-hover:bg-gold/5 transition-colors" />
+                                   </div>
+                                ))}
+                             </div>
+                          </div>
+                        )}
 
                         {/* Order Timeline */}
                         <div className="py-10 overflow-x-auto scrollbar-hide -mx-6 px-6">
@@ -750,16 +1021,58 @@ export default function App() {
               </motion.div>
             ) : step === 0 ? (
               <motion.div key="conf" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-12">
-                <div className="relative h-48 md:h-64 rounded-xl overflow-hidden group">
-                  <img 
-                    src="https://picsum.photos/seed/luxury-shoe-care/1200/600" 
-                    className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-luxury-black via-transparent to-transparent" />
-                  <div className="absolute bottom-4 md:bottom-6 left-4 md:left-6 right-4 md:right-6">
-                    <p className="text-gold text-[8px] md:text-[10px] uppercase tracking-[0.4em] font-bold mb-1">Elite Workshop</p>
-                    <h3 className="text-xl md:text-2xl font-serif">Exhibition Grade Care</h3>
+                <div className="relative h-48 md:h-64 rounded-xl overflow-hidden group bg-luxury-gray/10">
+                  {!heroVideoLoaded && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-luxury-black/80 z-30">
+                      <div className="flex flex-col items-center gap-3">
+                        <Loader2 className="w-8 h-8 text-gold animate-spin" />
+                        <span className="text-[10px] uppercase tracking-widest text-gold font-bold">Awaiting Masterpiece</span>
+                      </div>
+                    </div>
+                  )}
+                  {heroVideoError ? (
+                    <div className="w-full h-full relative">
+                      <img 
+                        src="https://www.jabchaho.com/public/assets_new/images/services/detail/shoe-cleaning.jpg" 
+                        className={cn(
+                          "w-full h-full object-cover transition-all duration-1000",
+                          heroImageLoaded ? "opacity-100" : "opacity-0"
+                        )}
+                        onLoad={() => {
+                          setHeroImageLoaded(true);
+                          setHeroVideoLoaded(true);
+                        }}
+                        onError={() => setHeroVideoLoaded(true)}
+                        referrerPolicy="no-referrer"
+                      />
+                      {!heroImageLoaded && (
+                        <div className="absolute inset-0 bg-luxury-black flex items-center justify-center">
+                           <Sparkles className="w-12 h-12 text-gold/20 animate-pulse" />
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <video 
+                      src="/input_file_0.mp4"
+                      autoPlay 
+                      loop 
+                      muted 
+                      playsInline
+                      onLoadedData={() => setHeroVideoLoaded(true)}
+                      onError={() => {
+                        console.error("Video load failed, switching to image");
+                        setHeroVideoError(true);
+                      }}
+                      className={cn(
+                        "w-full h-full object-cover transition-all duration-1000 group-hover:scale-105",
+                        heroVideoLoaded ? "opacity-100 scale-100" : "opacity-0 scale-110"
+                      )}
+                    />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-luxury-black via-transparent/20 to-transparent z-10" />
+                  <div className="absolute bottom-4 md:bottom-6 left-4 md:left-6 right-4 md:right-6 z-20">
+                    <p className="text-gold text-[8px] md:text-[10px] uppercase tracking-[0.4em] font-bold mb-1 shadow-black/50 text-shadow-sm">Elite Workshop</p>
+                    <h3 className="text-xl md:text-2xl font-serif text-shadow-lg">Exhibition Grade Care</h3>
                   </div>
                 </div>
                 
@@ -794,10 +1107,17 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-4">
                     {shoeImages.map((src, idx) => (
-                      <div key={idx} className="aspect-square rounded-lg border border-luxury-border overflow-hidden relative group">
-                        <img src={src} className="w-full h-full object-cover" />
+                      <div key={idx} className="aspect-square rounded-lg border border-luxury-border overflow-hidden relative group cursor-zoom-in">
+                        <img 
+                          src={src} 
+                          className="w-full h-full object-cover transition-transform group-hover:scale-110" 
+                          onClick={() => setZoomedImage(src)}
+                        />
                         <button 
-                          onClick={() => setShoeImages(prev => prev.filter((_, i) => i !== idx))}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShoeImages(prev => prev.filter((_, i) => i !== idx));
+                          }}
                           className="absolute top-1 right-1 bg-red-500/80 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
                         >
                           <Minus className="w-3 h-3" />
@@ -832,7 +1152,7 @@ export default function App() {
                           <div className="h-32 mb-4 overflow-hidden -mx-6 -mt-6">
                              <img 
                               src={service.image} 
-                              className={cn("w-full h-full object-cover grayscale opacity-50 transition-all duration-700 group-hover:scale-110 group-hover:grayscale-0 group-hover:opacity-100", selected && "grayscale-0 opacity-100 scale-105")}
+                              className={cn("w-full h-full object-cover transition-all duration-700 group-hover:scale-110", selected && "scale-105")}
                               referrerPolicy="no-referrer"
                              />
                           </div>
@@ -1082,7 +1402,7 @@ export default function App() {
       </main>
 
       <footer className="h-16 border-t border-luxury-border flex items-center justify-center text-[10px] text-text-dim uppercase tracking-[0.4em] font-medium">
-         © 2026 ሊ STRO PRESERVATION ATELIER
+         © 2026 ሊ-STRO 
       </footer>
     </div>
   );
