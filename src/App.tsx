@@ -13,7 +13,7 @@ import {
   Camera, Image as ImageIcon, CreditCard, ExternalLink,
   Clock, PackageCheck, Thermometer, Search,
   Sun, Moon, Download, Bell, BellOff, Info,
-  Filter, Calendar, X
+  Filter, Calendar, X, Locate
 } from 'lucide-react';
 import axios from 'axios';
 import { nanoid } from 'nanoid';
@@ -23,14 +23,29 @@ import {
 import { 
   collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, doc, updateDoc, getDoc, setDoc, increment, arrayUnion 
 } from 'firebase/firestore';
-import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api';
 import { auth, db, messaging, getToken, onMessage } from './lib/firebase';
-import usePlacesAutocomplete, {
-  getGeocode,
-  getLatLng,
-} from "use-places-autocomplete";
+import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
 import { cn, formatCurrency } from './lib/utils';
 import { AVAILABLE_SERVICES, type LogisticsType, type Order, type UserProfile } from './types';
+import { TRANSLATIONS } from './translations';
+
+// Fix Leaflet marker icon issues
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+function MapRecenter({ center }: { center: [number, number] }) {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center, map.getZoom());
+  }, [center, map]);
+  return null;
+}
 
 // Components
 const Button = ({ 
@@ -92,63 +107,83 @@ const StarRating = ({ rating, setRating, interactive = false }: { rating: number
 const AddressAutocomplete = ({ 
   onSelect, 
   defaultValue = "",
-  isLoaded
+  t
 }: { 
   onSelect: (address: string, coords?: { lat: number, lng: number }) => void, 
   defaultValue?: string,
-  isLoaded: boolean
+  isLoaded: boolean,
+  t: (key: any) => string
 }) => {
-  const {
-    ready,
-    value,
-    suggestions: { status, data },
-    setValue,
-    clearSuggestions,
-  } = usePlacesAutocomplete({
-    requestOptions: {
-      /* Define search scope here */
-    },
-    debounce: 300,
-    defaultValue,
-    initOnMount: isLoaded
-  });
-
+  const [value, setValue] = useState(defaultValue);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [status, setStatus] = useState<'idle' | 'OK' | 'ZERO_RESULTS'>('idle');
   const [isVerifying, setIsVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isLoaded && defaultValue) {
-      setValue(defaultValue, false);
+    setValue(defaultValue);
+  }, [defaultValue]);
+
+  const handleInput = async (e: ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value;
+    setValue(query);
+    setError(null);
+
+    if (query.length < 3) {
+      setSuggestions([]);
+      setStatus('idle');
+      return;
     }
-  }, [isLoaded, defaultValue, setValue]);
 
-  const handleInput = (e: ChangeEvent<HTMLInputElement>) => {
-    setValue(e.target.value);
-    setError(null);
+    try {
+      const response = await axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&addressdetails=1&limit=5`);
+      setSuggestions(response.data);
+      setStatus(response.data.length > 0 ? 'OK' : 'ZERO_RESULTS');
+    } catch (err) {
+      console.error("Nominatim search failed", err);
+    }
   };
 
-  const handleSelect = ({ description }: { description: string }) => () => {
-    setValue(description, false);
-    clearSuggestions();
+  const handleSelect = (sug: any) => () => {
+    const lat = parseFloat(sug.lat);
+    const lon = parseFloat(sug.lon);
+    setValue(sug.display_name);
+    setSuggestions([]);
+    setStatus('idle');
+    onSelect(sug.display_name, { lat, lng: lon });
+  };
+
+  const captureLocation = () => {
+    if (!navigator.geolocation) {
+      setError("Geolocation is not supported by your browser");
+      return;
+    }
+
     setIsVerifying(true);
-    setError(null);
-
-    getGeocode({ address: description })
-      .then((results) => {
-        const { lat, lng } = getLatLng(results[0]);
-        onSelect(description, { lat, lng });
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+        try {
+          const response = await axios.get(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+          if (response.data) {
+            const addr = response.data.display_name;
+            setValue(addr);
+            onSelect(addr, { lat: latitude, lng: longitude });
+          }
+        } catch (err) {
+          console.error("Reverse geocoding failed", err);
+          onSelect(`${latitude}, ${longitude}`, { lat: latitude, lng: longitude });
+        } finally {
+          setIsVerifying(false);
+        }
+      },
+      (err) => {
+        console.error("Geolocation error", err);
+        setError("Location access denied or unavailable");
         setIsVerifying(false);
-      })
-      .catch((err) => {
-        console.error("Geocoding failed:", err);
-        setError("Precision location unavailable. Proceed with manual address?");
-        setIsVerifying(false);
-        // We still allow selection but flag it
-        onSelect(description);
-      });
+      }
+    );
   };
-
-  if (!isLoaded) return <div className="h-16 luxury-card animate-pulse border-gold/10" />;
 
   return (
     <div className="relative w-full">
@@ -160,11 +195,22 @@ const AddressAutocomplete = ({
         <input
           value={value}
           onChange={handleInput}
-          disabled={!ready || isVerifying}
-          placeholder="Street Address, City, Postal Code"
+          disabled={isVerifying}
+          placeholder={t('addressPlaceholder')}
           className="bg-transparent border-none flex-1 focus:ring-0 text-white placeholder:text-text-dim py-2 outline-none"
         />
-        {isVerifying && <Loader2 className="w-4 h-4 text-gold animate-spin" />}
+        {isVerifying ? (
+          <Loader2 className="w-4 h-4 text-gold animate-spin" />
+        ) : (
+          <button 
+            type="button"
+            onClick={(e) => { e.stopPropagation(); captureLocation(); }}
+            className="p-1.5 hover:bg-white/5 rounded-full transition-colors group"
+            title="Use current location"
+          >
+            <Locate className="w-4 h-4 text-gold/40 group-hover:text-gold" />
+          </button>
+        )}
       </div>
       
       {error && (
@@ -175,38 +221,30 @@ const AddressAutocomplete = ({
       )}
 
       {status === "OK" && (
-        <ul className="absolute z-50 w-full mt-2 luxury-card p-2 border-gold/30 shadow-2xl max-h-60 overflow-y-auto">
-          {data.map((suggestion) => {
-            const {
-              place_id,
-              structured_formatting: { main_text, secondary_text },
-            } = suggestion;
-
-            return (
-              <li
-                key={place_id}
-                onClick={handleSelect(suggestion)}
-                className="p-3 hover:bg-gold/10 cursor-pointer rounded-full transition-colors group"
-              >
-                <div className="flex items-center gap-3">
-                  <MapPin className="w-4 h-4 text-text-dim group-hover:text-gold" />
-                  <div>
-                    <strong className="text-sm block text-white group-hover:text-gold">{main_text}</strong>
-                    <small className="text-[10px] text-text-dim block">{secondary_text}</small>
-                  </div>
-                </div>
-              </li>
-            );
-          })}
+        <ul className="absolute z-50 w-full mt-2 luxury-card p-2 border-gold/30 shadow-2xl max-h-60 overflow-y-auto bg-luxury-black/95 backdrop-blur-xl">
+          {suggestions.map((sug) => (
+            <li 
+              key={sug.place_id} 
+              onClick={handleSelect(sug)}
+              className="p-3 hover:bg-gold/10 cursor-pointer rounded-lg transition-colors border-b border-white/5 last:border-none group"
+            >
+              <div className="flex items-center gap-3">
+                <MapPin className="w-4 h-4 text-gold/40 group-hover:text-gold" />
+                <span className="text-[11px] text-white/80 group-hover:text-white transition-colors">{sug.display_name}</span>
+              </div>
+            </li>
+          ))}
         </ul>
       )}
     </div>
   );
 };
 
-const LIBRARIES: ("places" | "geometry" | "drawing" | "visualization")[] = ['places'];
 
 export default function App() {
+  const [lang, setLang] = useState<'en' | 'am'>('en');
+  const t = (key: keyof typeof TRANSLATIONS['en']) => TRANSLATIONS[lang][key] || (key as string);
+
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -225,11 +263,6 @@ export default function App() {
   const [shoeImages, setShoeImages] = useState<string[]>([]);
   const [paymentStatus, setPaymentStatus] = useState<'idle' | 'initializing' | 'waiting' | 'failed'>('idle');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const { isLoaded } = useJsApiLoader({
-    id: 'google-map-script',
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
-    libraries: LIBRARIES
-  });
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   
   // Loyalty & Discounts
@@ -395,10 +428,10 @@ export default function App() {
     return quantity * servicesTotal;
   }, [quantity, selectedServices]);
 
-  const logisticsFee = logistics === 'pickup' ? 1000 : 0;
-  const referralDiscount = discountValue;
-  const loyaltySavings = redeemPoints ? Math.min(subtotal + logisticsFee, (profile?.loyaltyPoints || 0) / 10) : 0;
-  const total = Math.max(0, subtotal + logisticsFee - referralDiscount - loyaltySavings);
+  const logisticsFee = logistics === 'pickup' ? 100 : 0;
+  const referralDiscount = couponCode.toUpperCase() === 'LISTRO20' && discountValue > 0 ? (subtotal * 0.2) : 0;
+  const loyaltySavings = redeemPoints ? Math.min(subtotal - referralDiscount, (profile?.loyaltyPoints || 0) / 10) : 0;
+  const total = Math.max(0, subtotal - referralDiscount - loyaltySavings) + logisticsFee;
 
   const handleLogin = async () => {
     try {
@@ -410,10 +443,10 @@ export default function App() {
 
   const applyCoupon = () => {
     if (couponCode.toUpperCase() === 'LISTRO20') {
-      setDiscountValue(2000);
-      alert('Coupon applied! 2000 ETB off.');
+      setDiscountValue(20); // Using 20 as a flag for 20%
+      alert(t('couponApplied'));
     } else {
-      alert('Invalid coupon code. Try LISTRO20');
+      alert(t('invalidCoupon'));
       setDiscountValue(0);
     }
   };
@@ -537,10 +570,10 @@ export default function App() {
           <img src="https://images.unsplash.com/photo-1623945417032-47864f199320?auto=format&fit=crop&q=80&w=1920&h=1080" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
         </div>
         <div className="relative z-10 max-w-sm">
-          <h1 className="font-serif text-6xl mb-4 text-gold tracking-[0.2em]">ሊ STRO</h1>
-          <p className="text-text-dim mb-12 tracking-widest font-light text-xs uppercase italic">Excellence in every fiber.</p>
+          <h1 className="font-serif text-6xl mb-4 text-gold tracking-[0.2em]">{t('brand')}</h1>
+          <p className="text-text-dim mb-12 tracking-widest font-light text-xs uppercase italic">{t('tagline')}</p>
           <Button onClick={handleLogin} size="lg" className="w-full">
-            Authenticate
+            {t('authenticate')}
           </Button>
         </div>
 
@@ -572,7 +605,7 @@ export default function App() {
                   referrerPolicy="no-referrer"
                 />
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-luxury-black/60 px-4 py-2 rounded-full backdrop-blur-md border border-gold/20">
-                  <p className="text-[10px] uppercase tracking-widest text-gold font-bold">Inspect Detail View</p>
+                  <p className="text-[10px] uppercase tracking-widest text-gold font-bold">{t('inspectDetail')}</p>
                 </div>
               </motion.div>
             </motion.div>
@@ -648,11 +681,17 @@ export default function App() {
           )}
         </div>
         <div className="flex items-center gap-2 md:gap-8">
+           <button 
+            onClick={() => setLang(lang === 'en' ? 'am' : 'en')} 
+            className="p-1.5 md:p-2 rounded-full text-gold/80 hover:text-gold transition-all border border-gold/20 hover:border-gold/50 flex items-center gap-2 bg-gold/5"
+          >
+            <span className="text-[10px] font-bold uppercase tracking-widest">{lang === 'en' ? 'AM' : 'EN'}</span>
+          </button>
           <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 rounded-full text-gold/60 hover:text-gold transition-colors">
             {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
           </button>
           <div className="hidden sm:flex flex-col items-end">
-            <span className="text-[10px] text-luxury-border uppercase tracking-widest font-bold">Loyalty Points</span>
+            <span className="text-[10px] text-luxury-border uppercase tracking-widest font-bold">{t('loyaltyPoints')}</span>
             <span className="text-gold font-medium flex items-center gap-1.5 text-xs md:text-sm">
               <Gift className="w-3 h-3" />
               {profile?.loyaltyPoints || 0}
@@ -673,7 +712,7 @@ export default function App() {
              <div className="hidden sm:block text-right">
                 <p className="text-[10px] md:text-xs font-bold uppercase tracking-tighter opacity-80 max-w-[80px] md:max-w-none truncate">{user.displayName}</p>
                 <button onClick={() => setView(view === 'history' ? 'home' : 'history')} className="text-[9px] md:text-[10px] text-gold uppercase tracking-widest hover:underline">
-                   {view === 'history' ? 'Dashboard' : 'History'}
+                   {view === 'history' ? t('dashboard') : t('history')}
                 </button>
              </div>
              <div className="w-8 h-8 md:w-10 md:h-10 rounded-full border border-luxury-border overflow-hidden flex-shrink-0">
@@ -717,9 +756,9 @@ export default function App() {
             <div className="luxury-card border-none bg-transparent lg:bg-luxury-gray/80 lg:border lg:border-luxury-border p-2 lg:p-6 rounded-xl">
                <div className="flex flex-row lg:flex-col gap-4 lg:gap-6 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0 scrollbar-hide">
                   {[
-                    { n: '01', l: 'Atelier', s: 0 },
-                    { n: '02', l: 'Logistics', s: 1 },
-                    { n: '03', l: 'Review', s: 2 }
+                    { n: '01', l: t('atelier'), s: 0 },
+                    { n: '02', l: t('logistics'), s: 1 },
+                    { n: '03', l: t('review'), s: 2 }
                   ].map(st => (
                     <div key={st.n} className={cn("flex items-center gap-4 transition-opacity flex-shrink-0", step === st.s ? "opacity-100" : "opacity-30")}>
                       <div className={cn("step-num", step === st.s && "bg-gold border-gold text-white font-bold text-xs")}>{st.n}</div>
@@ -729,30 +768,37 @@ export default function App() {
                </div>
             </div>
 
-            <div className="luxury-card flex flex-col gap-6">
-               <h3 className="text-[10px] uppercase tracking-[0.2em] text-text-dim font-bold">Order Selection</h3>
-               <div className="space-y-4">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-text-dim">Items</span>
-                    <span>{quantity} {quantity === 1 ? 'Pair' : 'Pairs'}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-text-dim">Base Care</span>
-                    <span className="text-right max-w-[150px] truncate">
-                      {selectedServices.map(sid => AVAILABLE_SERVICES.find(s => s.id === sid)?.name).join(', ')}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-text-dim">Logistics</span>
-                    <span className="capitalize">{logistics}</span>
-                  </div>
+             <div className="luxury-card flex flex-col gap-6">
+                <h3 className="text-[10px] uppercase tracking-[0.2em] text-text-dim font-bold">{t('orderSelection')}</h3>
+                <div className="space-y-4">
+                   <div className="flex justify-between items-center text-sm">
+                     <span className="text-text-dim">{t('items')}</span>
+                     <span>{quantity} {quantity === 1 ? t('pair') : t('pairs')}</span>
+                   </div>
+                   <div className="flex justify-between items-center text-sm">
+                     <span className="text-text-dim">{t('baseCare')}</span>
+                     <span className="text-right max-w-[150px] truncate">
+                       {selectedServices.map(sid => {
+                         const s = AVAILABLE_SERVICES.find(as => as.id === sid);
+                         if (!s) return '';
+                         if (sid === 'deep-cleaning') return t('deepCleaningName');
+                         if (sid === 'disinfecting') return t('disinfectingName');
+                         if (sid === 'shining') return t('shiningName');
+                         return s.name;
+                       }).join(', ')}
+                     </span>
+                   </div>
+                   <div className="flex justify-between items-center text-sm">
+                     <span className="text-text-dim">{t('logistics')}</span>
+                     <span className="capitalize">{logistics === 'drop-off' ? t('dropOff') : t('pickup')}</span>
+                   </div>
 
-                  {logistics === 'pickup' && (
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-text-dim">Pickup Fee</span>
-                      <span>{formatCurrency(1000)}</span>
-                    </div>
-                  )}
+                   {logistics === 'pickup' && (
+                     <div className="flex justify-between items-center text-sm">
+                       <span className="text-text-dim">{t('pickupFee')}</span>
+                       <span>{formatCurrency(1000)}</span>
+                     </div>
+                   )}
 
                   {discountValue > 0 && (
                     <div className="flex justify-between items-center text-sm text-green-500">
@@ -769,8 +815,8 @@ export default function App() {
                   )}
 
                   <div className="pt-6 border-t border-luxury-border flex justify-between items-center">
-                    <span className="text-lg font-bold">Total</span>
-                    <span className="text-2xl font-bold text-gold">{formatCurrency(total)}</span>
+                    <span className="text-lg font-bold">{t('total')}</span>
+                    <span className="text-2xl font-bold text-gold">{formatCurrency(total, lang)}</span>
                   </div>
                </div>
             </div>
@@ -782,7 +828,7 @@ export default function App() {
             {view === 'history' ? (
               <motion.div key="history" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
                 <div className="flex justify-between items-center">
-                  <h2 className="text-3xl font-serif">Mission Archive</h2>
+                  <h2 className="text-3xl font-serif">{t('missionArchive')}</h2>
                   <button 
                     onClick={() => setIsFilterOpen(!isFilterOpen)}
                     className={cn(
@@ -793,7 +839,7 @@ export default function App() {
                     )}
                   >
                     <Filter className="w-3 h-3" />
-                    {isFilterOpen ? 'Close Filters' : 'Filter Archive'}
+                    {isFilterOpen ? t('resetParameters') : t('filterArchive')}
                   </button>
                 </div>
 
@@ -807,20 +853,20 @@ export default function App() {
                     >
                       <div className="luxury-card grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                         <div className="space-y-2">
-                          <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Service Type</label>
+                          <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold">{t('serviceType')}</label>
                           <select 
                             value={filterService}
                             onChange={(e) => setFilterService(e.target.value)}
                             className="w-full bg-luxury-black border border-luxury-border rounded p-3 text-xs text-white focus:border-gold outline-none"
                           >
-                            <option value="all">All Specialties</option>
+                            <option value="all">{t('allSpecialties')}</option>
                             {AVAILABLE_SERVICES.map(s => (
-                              <option key={s.id} value={s.id}>{s.name}</option>
+                              <option key={s.id} value={s.id}>{s.id === 'deep-cleaning' ? t('deepCleaningName') : s.id === 'disinfecting' ? t('disinfectingName') : t('shiningName')}</option>
                             ))}
                           </select>
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold">From Date</label>
+                          <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold">{t('fromDate')}</label>
                           <div className="relative">
                             <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-gold opacity-50" />
                             <input 
@@ -832,7 +878,7 @@ export default function App() {
                           </div>
                         </div>
                         <div className="space-y-2">
-                          <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold">To Date</label>
+                          <label className="text-[10px] uppercase tracking-widest text-text-dim font-bold">{t('toDate')}</label>
                           <div className="relative">
                             <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-gold opacity-50" />
                             <input 
@@ -852,7 +898,7 @@ export default function App() {
                             }}
                             className="text-[10px] uppercase tracking-widest text-gold hover:underline font-bold flex items-center gap-2"
                            >
-                              <X className="w-3 h-3" /> Reset Parameters
+                              <X className="w-3 h-3" /> {t('resetParameters')}
                            </button>
                         </div>
                       </div>
@@ -863,7 +909,7 @@ export default function App() {
                 {filteredOrders.length === 0 ? (
                    <div className="luxury-card text-center py-20 space-y-4">
                       <History className="w-12 h-12 text-white/5 mx-auto" />
-                      <p className="text-text-dim italic">No previous engagements found.</p>
+                      <p className="text-text-dim italic">{t('missionArchiveEmpty')}</p>
                    </div>
                 ) : (
                   <div className="grid gap-6">
@@ -871,8 +917,8 @@ export default function App() {
                       <div key={o.id} className="luxury-card flex flex-col gap-4">
                         <div className="flex justify-between items-start">
                           <div>
-                            <p className="text-[10px] uppercase text-text-dim mb-1 font-bold">{o.createdAt?.toDate?.()?.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) || 'Recent Engagement'}</p>
-                            <h4 className="font-serif text-lg">{o.quantity} {o.quantity === 1 ? 'Pair' : 'Pairs'} Restoration</h4>
+                            <p className="text-[10px] uppercase text-text-dim mb-1 font-bold">{o.createdAt?.toDate?.()?.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) || t('recentEngagement')}</p>
+                            <h4 className="font-serif text-lg">{o.quantity} {o.quantity === 1 ? t('pair') : t('pairs')} {t('restoration')}</h4>
                             <div className="flex flex-wrap gap-2 mt-3">
                                {o.services.map(sid => {
                                   const service = AVAILABLE_SERVICES.find(s => s.id === sid);
@@ -883,7 +929,7 @@ export default function App() {
                                   return (
                                      <div key={sid} className="flex items-center gap-1.5 text-[8px] uppercase tracking-[0.15em] text-white/50 font-bold bg-white/5 px-2 py-1 rounded border border-white/5">
                                         <Icon className="w-2.5 h-2.5 text-gold/70" />
-                                        {service.name}
+                                        {sid === 'deep-cleaning' ? t('deepCleaningName') : sid === 'disinfecting' ? t('disinfectingName') : t('shiningName')}
                                      </div>
                                   );
                                })}
@@ -895,14 +941,14 @@ export default function App() {
                                o.status === 'completed' ? "border-green-500/30 text-green-500" : 
                                o.status === 'cancelled' ? "border-red-500/30 text-red-500" :
                                "border-gold/30 text-gold"
-                             )}>{o.status.replace('-', ' ')}</span>
-                              <p className="text-gold font-bold mt-2">{formatCurrency(o.estimatedCost)}</p>
+                             )}>{t(o.status.replace('-', ''))}</span>
+                              <p className="text-gold font-bold mt-2">{formatCurrency(o.estimatedCost, lang)}</p>
                               {o.status === 'completed' && (
                                 <button 
                                   onClick={() => setTrackingOrder(o)}
                                   className="mt-2 flex items-center gap-1 text-[9px] text-gold uppercase tracking-widest hover:underline font-bold"
                                 >
-                                  <Truck className="w-3 h-3" /> Track Order
+                                  <Truck className="w-3 h-3" /> {t('trackOrder')}
                                 </button>
                               )}
                            </div>
@@ -919,12 +965,12 @@ export default function App() {
                             {o.paymentStatus === 'success' ? <CheckCircle2 className="w-3 h-3" /> :
                              o.paymentStatus === 'failed' ? <BellOff className="w-3 h-3" /> :
                              <CreditCard className="w-3 h-3" />}
-                            Payment: {o.paymentStatus || 'Pending'}
+                            {t('payment')}: {t(o.paymentStatus || 'pending')}
                           </div>
                           
                           {o.paymentStatus === 'success' && o.tx_ref && (
                             <div className="flex items-center gap-2 text-[10px] text-text-dim italic">
-                              <span className="font-bold uppercase tracking-tighter not-italic text-[8px] opacity-50">Ref:</span>
+                              <span className="font-bold uppercase tracking-tighter not-italic text-[8px] opacity-50">{t('ref')}:</span>
                               {o.tx_ref}
                             </div>
                           )}
@@ -933,7 +979,7 @@ export default function App() {
                         {/* Order Photos */}
                         {o.shoeImages && o.shoeImages.length > 0 && (
                           <div className="pt-2">
-                             <p className="text-[9px] uppercase tracking-widest text-text-dim mb-3 font-bold opacity-50">Archived Photography</p>
+                             <p className="text-[9px] uppercase tracking-widest text-text-dim mb-3 font-bold opacity-50">{t('archivedPhotography')}</p>
                              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
                                 {o.shoeImages.map((img, i) => (
                                    <div 
@@ -953,12 +999,12 @@ export default function App() {
                         <div className="py-10 overflow-x-auto scrollbar-hide -mx-6 px-6">
                           <div className="flex items-center justify-between min-w-[650px] mb-12 relative px-2">
                              {[
-                               { id: 'pending', label: 'Received', icon: Clock },
-                               { id: 'confirmed', label: 'Accepted', icon: ShieldCheck },
-                               { id: 'cleaning', label: 'Cleaning', icon: Sparkles },
-                               { id: 'drying', label: 'Drying', icon: Thermometer },
-                               { id: 'quality-check', label: 'Polish', icon: Search },
-                               { id: 'ready', label: 'Ready', icon: PackageCheck }
+                               { id: 'pending', label: t('received'), icon: Clock },
+                               { id: 'confirmed', label: t('accepted'), icon: ShieldCheck },
+                               { id: 'cleaning', label: t('cleaning'), icon: Sparkles },
+                               { id: 'drying', label: t('drying'), icon: Thermometer },
+                               { id: 'quality-check', label: t('polish'), icon: Search },
+                               { id: 'ready', label: t('ready'), icon: PackageCheck }
                              ].map((st, idx, arr) => {
                                const statuses = arr.map(a => a.id);
                                const currentIndex = statuses.indexOf(o.status === 'completed' ? 'ready' : o.status);
@@ -1002,7 +1048,7 @@ export default function App() {
                         {o.status === 'completed' && !o.rating && (
                           <div className="pt-4 border-t border-luxury-border">
                              <p className="text-[10px] uppercase tracking-widest text-text-dim mb-4 font-bold">Feedback Required</p>
-                             <ReviewForm orderId={o.id!} onSubmit={submitReview} />
+                             <ReviewForm orderId={o.id!} onSubmit={submitReview} t={t} />
                           </div>
                         )}
 
@@ -1026,7 +1072,7 @@ export default function App() {
                     <div className="absolute inset-0 flex items-center justify-center bg-luxury-black/80 z-30">
                       <div className="flex flex-col items-center gap-3">
                         <Loader2 className="w-8 h-8 text-gold animate-spin" />
-                        <span className="text-[10px] uppercase tracking-widest text-gold font-bold">Awaiting Masterpiece</span>
+                        <span className="text-[10px] uppercase tracking-widest text-gold font-bold">{t('awaitingMasterpiece')}</span>
                       </div>
                     </div>
                   )}
@@ -1071,19 +1117,19 @@ export default function App() {
                   )}
                   <div className="absolute inset-0 bg-gradient-to-t from-luxury-black via-transparent/20 to-transparent z-10" />
                   <div className="absolute bottom-4 md:bottom-6 left-4 md:left-6 right-4 md:right-6 z-20">
-                    <p className="text-gold text-[8px] md:text-[10px] uppercase tracking-[0.4em] font-bold mb-1 shadow-black/50 text-shadow-sm">Elite Workshop</p>
-                    <h3 className="text-xl md:text-2xl font-serif text-shadow-lg">Exhibition Grade Care</h3>
+                    <p className="text-gold text-[8px] md:text-[10px] uppercase tracking-[0.4em] font-bold mb-1 shadow-black/50 text-shadow-sm">{t('eliteWorkshop')}</p>
+                    <h3 className="text-xl md:text-2xl font-serif text-shadow-lg">{t('exhibitionGradeCare')}</h3>
                   </div>
                 </div>
                 
                 <section>
                   <div className="mb-6 md:mb-8">
-                    <h2 className="text-2xl md:text-3xl font-light mb-1">Quantity & Logistics</h2>
-                    <p className="text-text-dim text-xs md:text-sm">Define the scope of your restoration.</p>
+                    <h2 className="text-2xl md:text-3xl font-light mb-1">{t('quantityLogistics')}</h2>
+                    <p className="text-text-dim text-xs md:text-sm">{t('defineScope')}</p>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-8 sm:gap-16 sm:items-end">
                     <div className="space-y-3">
-                      <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Pairs to Restore</p>
+                      <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">{t('pairsToRestore')}</p>
                       <div className="flex items-center gap-6">
                         <button onClick={() => setQuantity(Math.max(1, quantity - 1))} className="w-10 h-10 rounded-full border border-luxury-border bg-luxury-black hover:bg-gold hover:text-luxury-black transition-all">-</button>
                         <span className="text-2xl md:text-3xl font-serif w-8 text-center">{quantity}</span>
@@ -1091,19 +1137,41 @@ export default function App() {
                       </div>
                     </div>
                     <div className="space-y-3 flex-1 max-w-sm">
-                      <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Movement Method</p>
+                      <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">{t('movementMethodTitle')}</p>
                       <div className="bg-luxury-black p-1.5 rounded-lg border border-luxury-border flex">
-                        <button onClick={() => setLogistics('drop-off')} className={cn("flex-1 py-1.5 rounded-full text-[10px] md:text-[11px] font-bold uppercase tracking-widest transition-all", logistics === 'drop-off' ? "bg-gold text-luxury-black shadow-lg" : "text-text-dim")}>Drop-off</button>
-                        <button onClick={() => setLogistics('pickup')} className={cn("flex-1 py-1.5 rounded-full text-[10px] md:text-[11px] font-bold uppercase tracking-widest transition-all", logistics === 'pickup' ? "bg-gold text-luxury-black shadow-lg" : "text-text-dim")}>Pickup</button>
+                        <button onClick={() => setLogistics('drop-off')} className={cn("flex-1 py-1.5 rounded-full text-[10px] md:text-[11px] font-bold uppercase tracking-widest transition-all", logistics === 'drop-off' ? "bg-gold text-luxury-black shadow-lg" : "text-text-dim")}>{t('dropOff')}</button>
+                        <button onClick={() => setLogistics('pickup')} className={cn("flex-1 py-1.5 rounded-full text-[10px] md:text-[11px] font-bold uppercase tracking-widest transition-all", logistics === 'pickup' ? "bg-gold text-luxury-black shadow-lg" : "text-text-dim")}>{t('pickup')}</button>
                       </div>
                     </div>
                   </div>
+
+                  <AnimatePresence>
+                    {logistics === 'pickup' && (
+                      <motion.div 
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden space-y-4 pt-4"
+                      >
+                         <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">{t('pickupInformation')}</p>
+                         <AddressAutocomplete 
+                          onSelect={(addr, coords) => {
+                            setAddress(addr);
+                            if (coords) setAddressCoords(coords);
+                            else setAddressCoords(null);
+                          }} 
+                          defaultValue={address} 
+                          t={t}
+                        />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </section>
 
                 <section>
                   <div className="mb-6 md:mb-8">
-                    <h2 className="text-2xl md:text-3xl font-light mb-1">Footwear Photography</h2>
-                    <p className="text-text-dim text-xs md:text-sm">Document your items for our preservation archive.</p>
+                    <h2 className="text-2xl md:text-3xl font-light mb-1">{t('footwearPhotography')}</h2>
+                    <p className="text-text-dim text-xs md:text-sm">{t('documentItems')}</p>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-4">
                     {shoeImages.map((src, idx) => (
@@ -1126,7 +1194,7 @@ export default function App() {
                     ))}
                     <label className="aspect-square rounded-lg border border-dashed border-luxury-border flex flex-col items-center justify-center cursor-pointer hover:border-gold hover:bg-gold/5 transition-all group">
                       <Camera className="w-6 h-6 text-text-dim group-hover:text-gold mb-2" />
-                      <span className="text-[10px] uppercase font-bold text-text-dim group-hover:text-gold">Add Photo</span>
+                      <span className="text-[10px] uppercase font-bold text-text-dim group-hover:text-gold">{t('addPhoto')}</span>
                       <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
                     </label>
                   </div>
@@ -1134,8 +1202,8 @@ export default function App() {
 
                 <section>
                   <div className="mb-6 md:mb-8">
-                    <h2 className="text-2xl md:text-3xl font-light mb-1">Customization</h2>
-                    <p className="text-text-dim text-xs md:text-sm">Expert treatments tailored to your footwear.</p>
+                    <h2 className="text-2xl md:text-3xl font-light mb-1">{t('customization')}</h2>
+                    <p className="text-text-dim text-xs md:text-sm">{t('expertTreatments')}</p>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
                     {AVAILABLE_SERVICES.map(service => {
@@ -1157,11 +1225,11 @@ export default function App() {
                              />
                           </div>
                           <div>
-                            <h4 className="text-sm font-bold tracking-tight mb-2 uppercase">{service.name}</h4>
-                            <p className="text-[10px] text-text-dim leading-relaxed mb-6 font-medium italic">{service.description}</p>
+                            <h4 className="text-sm font-bold tracking-tight mb-2 uppercase">{service.id === 'deep-cleaning' ? t('deepCleaningName') : service.id === 'disinfecting' ? t('disinfectingName') : t('shiningName')}</h4>
+                            <p className="text-[10px] text-text-dim leading-relaxed mb-6 font-medium italic">{service.id === 'deep-cleaning' ? t('deepCleaningDesc') : service.id === 'disinfecting' ? t('disinfectingDesc') : t('shiningDesc')}</p>
                           </div>
                           <div className="mt-auto pt-4 border-t border-luxury-border flex justify-between items-center">
-                             <span className="text-gold text-xs font-bold tracking-tighter">{formatCurrency(service.pricePerShoe)} / pair</span>
+                             <span className="text-gold text-xs font-bold tracking-tighter">{formatCurrency(service.pricePerShoe, lang)} / pair</span>
                              {selected && <CheckCircle2 className="w-4 h-4 text-gold" />}
                           </div>
                         </div>
@@ -1171,7 +1239,7 @@ export default function App() {
                   <div className="mt-6">
                     <input 
                       type="text" 
-                      placeholder="Add Custom Service (e.g. Sole repair, Lace replacement)" 
+                      placeholder={t('addCustomService')} 
                       className="w-full bg-transparent border border-dashed border-luxury-border p-4 rounded-lg text-xs italic focus:border-gold focus:outline-none placeholder:text-text-dim"
                       value={customService}
                       onChange={(e) => setCustomService(e.target.value)}
@@ -1179,57 +1247,40 @@ export default function App() {
                   </div>
                 </section>
 
-                <div className="flex justify-end pt-6">
-                  <Button size="lg" onClick={() => setStep(1)} disabled={selectedServices.length === 0} className="px-12">
-                    Proceed to Logistics
+                <div className="flex justify-center sm:justify-end pt-6">
+                  <Button size="lg" onClick={() => setStep(1)} disabled={selectedServices.length === 0 || (logistics === 'pickup' && !address)} className="px-12">
+                    {t('proceedToLogistics')}
                   </Button>
                 </div>
               </motion.div>
             ) : step === 1 ? (
               <motion.div key="logistics" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-12">
                  <button onClick={() => setStep(0)} className="text-[10px] text-text-dim uppercase tracking-widest hover:text-white flex items-center gap-1 font-bold">
-                    <ChevronLeft className="w-3 h-3" /> Back to Config
+                    <ChevronLeft className="w-3 h-3" /> {t('back')}
                  </button>
                  
                  {logistics === 'pickup' && (
                     <section>
                        <div className="mb-8">
-                        <h2 className="text-3xl font-light mb-1">Pickup Information</h2>
-                        <p className="text-text-dim text-sm">Where should our courier collect your pairs?</p>
+                        <h2 className="text-3xl font-light mb-1">{t('pickupInformation')}</h2>
+                        <p className="text-text-dim text-sm">{t('whereShouldCourier')}</p>
                       </div>
-                      <AddressAutocomplete 
-                        isLoaded={isLoaded}
-                        onSelect={(addr, coords) => {
-                          setAddress(addr);
-                          if (coords) setAddressCoords(coords);
-                          else setAddressCoords(null);
-                        }} 
-                        defaultValue={address} 
-                      />
 
-                      {addressCoords && isLoaded && (
-                        <div className="h-64 rounded-xl overflow-hidden border border-gold/20 shadow-xl relative group mt-6">
-                          <GoogleMap
-                            mapContainerStyle={{ width: '100%', height: '100%' }}
-                            center={addressCoords}
-                            zoom={15}
-                            options={{
-                              styles: theme === 'dark' ? [
-                                { "elementType": "geometry", "stylers": [{ "color": "#121212" }] },
-                                { "elementType": "labels.text.fill", "stylers": [{ "color": "#D4AF37" }] },
-                                { "elementType": "labels.text.stroke", "stylers": [{ "color": "#121212" }] },
-                                { "featureType": "administrative", "elementType": "geometry.stroke", "stylers": [{ "color": "#2a2a2a" }] },
-                                { "featureType": "landscape.natural", "elementType": "geometry", "stylers": [{ "color": "#1a1a1a" }] },
-                                { "featureType": "poi", "elementType": "geometry", "stylers": [{ "color": "#1a1a1a" }] },
-                                { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#2a2a2a" }] },
-                                { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#0a0a0a" }] }
-                              ] : [],
-                              disableDefaultUI: true,
-                              zoomControl: false,
-                            }}
+                      {addressCoords && (
+                        <div className="h-64 rounded-xl overflow-hidden border border-gold/20 shadow-xl relative group mt-6 leaflet-dark">
+                          <MapContainer 
+                            center={[addressCoords.lat, addressCoords.lng]} 
+                            zoom={15} 
+                            style={{ width: '100%', height: '100%' }}
+                            zoomControl={false}
                           >
-                            <Marker position={addressCoords} />
-                          </GoogleMap>
+                            <TileLayer
+                              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                            />
+                            <Marker position={[addressCoords.lat, addressCoords.lng]} />
+                            <MapRecenter center={[addressCoords.lat, addressCoords.lng]} />
+                          </MapContainer>
                         </div>
                       )}
                     </section>
@@ -1237,12 +1288,12 @@ export default function App() {
 
                  <section>
                     <div className="mb-6 md:mb-8">
-                      <h2 className="text-2xl md:text-3xl font-light mb-1">Loyalty & Privileges</h2>
-                      <p className="text-text-dim text-xs md:text-sm">Apply exclusive vouchers or redeem points.</p>
+                      <h2 className="text-2xl md:text-3xl font-light mb-1">{t('loyaltyPrivileges')}</h2>
+                      <p className="text-text-dim text-xs md:text-sm">{t('applyVouchers')}</p>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
                        <div className="luxury-card space-y-4 flex flex-col justify-between">
-                          <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Discount Privilege</p>
+                          <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">{t('discountPrivilege')}</p>
                           <div className="flex gap-2">
                              <input 
                                 type="text" 
@@ -1251,15 +1302,15 @@ export default function App() {
                                 value={couponCode}
                                 onChange={(e) => setCouponCode(e.target.value)}
                              />
-                             <Button size="md" onClick={applyCoupon} variant="outline" className="px-4">Apply</Button>
+                             <Button size="md" onClick={applyCoupon} variant="outline" className="px-4">{t('apply')}</Button>
                           </div>
                        </div>
                        <div className="luxury-card space-y-4 flex flex-col justify-between">
-                          <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">Point Redemption</p>
+                          <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">{t('pointRedemption')}</p>
                           <div className="flex items-center justify-between">
                              <div className="space-y-1">
-                                <p className="text-xs">Balance: <span className="text-gold font-bold">{profile?.loyaltyPoints || 0}</span></p>
-                                <p className="text-[10px] text-text-dim">Available savings: {formatCurrency(Math.floor((profile?.loyaltyPoints || 0) / 100) * 10)}</p>
+                                <p className="text-xs">{t('balance')}: <span className="text-gold font-bold">{profile?.loyaltyPoints || 0}</span></p>
+                                <p className="text-[10px] text-text-dim">{t('availableSavings')}: {formatCurrency(Math.floor((profile?.loyaltyPoints || 0) / 100) * 10, lang)}</p>
                              </div>
                              <button 
                                 onClick={() => setRedeemPoints(!redeemPoints)} 
@@ -1272,66 +1323,66 @@ export default function App() {
                     </div>
                  </section>
 
-                 <div className="flex justify-end pt-6">
+                 <div className="flex justify-center sm:justify-end pt-6">
                    <Button size="lg" onClick={() => setStep(2)} disabled={logistics === 'pickup' && !address.trim()} className="px-12">
-                     Review Manifest
+                     {t('reviewManifest')}
                    </Button>
                  </div>
               </motion.div>
             ) : step === 2 ? (
               <motion.div key="review" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-12">
                  <button onClick={() => setStep(1)} className="text-[10px] text-text-dim uppercase tracking-widest hover:text-white flex items-center gap-1 font-bold">
-                    <ChevronLeft className="w-3 h-3" /> Edit Details
+                    <ChevronLeft className="w-3 h-3" /> {t('logistics')}
                  </button>
                                 <div className="text-center space-y-4 mb-10">
-                    <h2 className="text-3xl md:text-5xl font-serif">Final Review</h2>
-                    <p className="text-text-dim uppercase tracking-[0.3em] text-[8px] md:text-[10px] font-bold">CONFIRM YOUR RESTORATION PARAMETERS</p>
+                    <h2 className="text-3xl md:text-5xl font-serif">{t('finalReview')}</h2>
+                    <p className="text-text-dim uppercase tracking-[0.3em] text-[8px] md:text-[10px] font-bold">{t('confirmParameters')}</p>
                  </div>
 
                  <div className="flex flex-col lg:grid lg:grid-cols-[1fr_350px] gap-8 md:gap-10">
                     <div className="space-y-6 md:space-y-8 order-2 lg:order-1">
                        <div className="luxury-card">
-                          <h4 className="text-[10px] uppercase tracking-widest text-text-dim mb-6 font-bold">Services Selection</h4>
+                          <h4 className="text-[10px] uppercase tracking-widest text-text-dim mb-6 font-bold">{t('servicesSelection')}</h4>
                           <div className="space-y-4">
                              {selectedServices.map(s => (
                                <div key={s} className="flex justify-between items-center px-1">
                                   <span className="text-sm font-medium">{AVAILABLE_SERVICES.find(as => as.id === s)?.name}</span>
-                                  <span className="text-gold text-xs font-bold">{formatCurrency(AVAILABLE_SERVICES.find(as => as.id === s)?.pricePerShoe || 0)} / pair</span>
+                                  <span className="text-gold text-xs font-bold">{formatCurrency(AVAILABLE_SERVICES.find(as => as.id === s)?.pricePerShoe || 0, lang)} / pair</span>
                                </div>
                              ))}
                              {customService && (
                                <div className="pt-4 border-t border-luxury-border">
-                                  <p className="text-[10px] text-text-dim uppercase mb-1 font-bold">Special Requirement</p>
+                                  <p className="text-[10px] text-text-dim uppercase mb-1 font-bold">{t('specialRequirement')}</p>
                                   <p className="text-xs italic opacity-80">{customService}</p>
                                </div>
                              )}
                           </div>
                        </div>
                        <div className="luxury-card">
-                          <h4 className="text-[10px] uppercase tracking-widest text-text-dim mb-6 font-bold">Logistics Interface</h4>
+                          <h4 className="text-[10px] uppercase tracking-widest text-text-dim mb-6 font-bold">{t('logisticsInterface')}</h4>
                           <div className="flex items-center gap-4">
                              <div className="w-10 h-10 md:w-12 md:h-12 rounded bg-gold/5 flex items-center justify-center border border-gold/20 flex-shrink-0">
                                {logistics === 'pickup' ? <Truck className="text-gold w-5 h-5 md:w-6 md:h-6" /> : <Store className="text-gold w-5 h-5 md:w-6 md:h-6" />}
                              </div>
                              <div className="flex-1 overflow-hidden">
-                                <p className="text-[10px] md:text-xs uppercase font-bold tracking-widest">{logistics} Method</p>
-                                <p className="text-[10px] md:text-[11px] text-text-dim mt-0.5 truncate">{address || 'Walk-in Boutique Drop-off'}</p>
+                                <p className="text-[10px] md:text-xs uppercase font-bold tracking-widest">{logistics === 'drop-off' ? t('dropOff') : t('pickup')} {t('movementMethod')}</p>
+                                <p className="text-[10px] md:text-[11px] text-text-dim mt-0.5 truncate">{address || t('walkInBoutique')}</p>
                              </div>
                           </div>
                        </div>
 
                        <div className="luxury-card">
-                          <h4 className="text-[10px] uppercase tracking-widest text-text-dim mb-6 font-bold">Secure Settlement</h4>
+                          <h4 className="text-[10px] uppercase tracking-widest text-text-dim mb-6 font-bold">{t('secureSettlement')}</h4>
                           <div className="flex items-center gap-4">
                              <div className="w-10 h-10 md:w-12 md:h-12 rounded bg-gold/5 flex items-center justify-center border border-gold/20 flex-shrink-0">
                                <CreditCard className="text-gold w-5 h-5 md:w-6 md:h-6" />
                              </div>
                              <div className="flex-1">
                                 <p className="text-[10px] md:text-xs uppercase font-bold tracking-widest flex items-center gap-2">
-                                  Chapa Payment Gateway
-                                  <span className="text-[8px] bg-gold text-luxury-black px-1 rounded">SECURE</span>
+                                  {t('secureSettlement')}
+                                  <span className="text-[8px] bg-gold text-luxury-black px-1 rounded">{t('secure')}</span>
                                 </p>
-                                <p className="text-[10px] md:text-[11px] text-text-dim mt-0.5">Redirecting to Chapa secure checkout upon confirmation.</p>
+                                <p className="text-[10px] md:text-[11px] text-text-dim mt-0.5">{t('chapaRedirect')}</p>
                              </div>
                           </div>
                        </div>
@@ -1339,22 +1390,22 @@ export default function App() {
 
                     <div className="luxury-card flex flex-col justify-between bg-gold/5 border-gold/30 p-8 order-1 lg:order-2">
                        <div className="space-y-6">
-                          <h4 className="text-[10px] uppercase tracking-widest text-text-dim mb-8 font-bold text-center border-b border-gold/20 pb-4">Manifest Valuation</h4>
+                          <h4 className="text-[10px] uppercase tracking-widest text-text-dim mb-8 font-bold text-center border-b border-gold/20 pb-4">{t('manifestValuation')}</h4>
                           <div className="space-y-4">
                              <div className="flex justify-between text-xs md:text-sm text-text-dim">
-                                <span>Restoration Fee ({quantity}x)</span>
-                                <span>{formatCurrency(subtotal)}</span>
+                                <span>{t('restorationFee')} ({quantity}x)</span>
+                                <span>{formatCurrency(subtotal, lang)}</span>
                              </div>
                              {logisticsFee > 0 && (
-                               <div className="flex justify-between text-xs md:text-sm text-text-dim">
-                                  <span>Logistics Logistics</span>
-                                  <span>{formatCurrency(1000)}</span>
-                               </div>
+                                <div className="flex justify-between text-xs md:text-sm text-text-dim">
+                                   <span>{t('logisticsFee')}</span>
+                                   <span>{formatCurrency(logisticsFee, lang)}</span>
+                                </div>
                              )}
                              {(referralDiscount > 0 || loyaltySavings > 0) && (
                                <div className="flex justify-between text-xs md:text-sm text-green-500 font-bold border-t border-luxury-border pt-4">
-                                  <span className="flex items-center gap-1 uppercase tracking-tighter">Savings Applied</span>
-                                  <span>-{formatCurrency(referralDiscount + loyaltySavings)}</span>
+                                  <span className="flex items-center gap-1 uppercase tracking-tighter">{t('savingsApplied')}</span>
+                                  <span>-{formatCurrency(referralDiscount + loyaltySavings, lang)}</span>
                                 </div>
                              )}
                           </div>
@@ -1362,16 +1413,16 @@ export default function App() {
                        <div className="pt-8 md:pt-10 border-t border-luxury-border mt-10">
                           <div className="flex justify-between items-end mb-8">
                              <div>
-                                <p className="text-[8px] md:text-[10px] text-text-dim uppercase font-bold mb-1 tracking-widest">Grand Total</p>
-                                <p className="text-4xl md:text-6xl font-serif text-gold leading-none">{formatCurrency(total)}</p>
+                                <p className="text-[8px] md:text-[10px] text-text-dim uppercase font-bold mb-1 tracking-widest">{t('grandTotal')}</p>
+                                <p className="text-4xl md:text-6xl font-serif text-gold leading-none">{formatCurrency(total, lang)}</p>
                              </div>
                              <div className="text-right">
-                                <p className="text-[8px] md:text-[10px] text-text-dim uppercase font-bold mb-1 tracking-widest">Earned</p>
-                                <p className="text-base md:text-lg font-serif text-gold">+{Math.floor(total)} <span className="text-[8px] md:text-[10px] font-sans font-bold uppercase">Points</span></p>
+                                <p className="text-[8px] md:text-[10px] text-text-dim uppercase font-bold mb-1 tracking-widest">{t('earned')}</p>
+                                <p className="text-base md:text-lg font-serif text-gold">+{Math.floor(total)} <span className="text-[8px] md:text-[10px] font-sans font-bold uppercase">{t('points')}</span></p>
                              </div>
                           </div>
                           <Button size="lg" onClick={placeOrder} isLoading={isSubmitting} className="w-full">
-                            {paymentStatus === 'initializing' ? 'Securing Connection...' : 'Confirm & Pay with Chapa'}
+                            {paymentStatus === 'initializing' ? t('securingConnection') : t('confirmPay')}
                           </Button>
                        </div>
                     </div>
@@ -1382,18 +1433,18 @@ export default function App() {
                  <div className="inline-flex items-center justify-center w-24 h-24 rounded-full border border-gold/30 bg-gold/5 mb-10">
                     <CheckCircle2 className="w-10 h-10 text-gold" />
                  </div>
-                 <h2 className="text-4xl md:text-6xl font-serif mb-6 tracking-tight">Manifest Received</h2>
+                 <h2 className="text-4xl md:text-6xl font-serif mb-6 tracking-tight">{t('manifestReceived')}</h2>
                  <p className="text-text-dim max-w-md mx-auto mb-16 italic text-xs md:text-sm leading-relaxed font-light">
-                   Our specialists have logged your request. We will reach out shortly to coordinate the handcraft process.
+                   {t('specialistsLogged')}
                  </p>
                  <div className="flex flex-col sm:flex-row gap-4 justify-center">
                     {deferredPrompt && (
                       <Button variant="outline" onClick={installPWA} className="px-12 gap-2">
-                        <Download className="w-4 h-4" /> Install App
+                        <Download className="w-4 h-4" /> {t('installApp')}
                       </Button>
                     )}
-                    <Button variant="outline" onClick={() => setView('history')} className="px-12">View Archive</Button>
-                    <Button onClick={() => { setStep(0); setView('home'); setQuantity(1); setSelectedServices(['deep-cleaning']); setAddress(''); setCouponCode(''); setDiscountValue(0); setRedeemPoints(false); }} className="px-12">New Engagement</Button>
+                    <Button variant="outline" onClick={() => setView('history')} className="px-12">{t('viewArchive')}</Button>
+                    <Button onClick={() => { setStep(0); setView('home'); setQuantity(1); setSelectedServices(['deep-cleaning']); setAddress(''); setCouponCode(''); setDiscountValue(0); setRedeemPoints(false); }} className="px-12">{t('newEngagement')}</Button>
                  </div>
               </motion.div>
             )}
@@ -1402,19 +1453,19 @@ export default function App() {
       </main>
 
       <footer className="h-16 border-t border-luxury-border flex items-center justify-center text-[10px] text-text-dim uppercase tracking-[0.4em] font-medium">
-         © 2026 ሊ-STRO 
+         © 2026 {t('brand')} 
       </footer>
     </div>
   );
 }
 
-function ReviewForm({ orderId, onSubmit }: { orderId: string, onSubmit: (oid: string, r: number, revText: string) => void }) {
+function ReviewForm({ orderId, onSubmit, t }: { orderId: string, onSubmit: (oid: string, r: number, revText: string) => void, t: (key: any) => string }) {
   const [rating, setRating] = useState(0);
   const [reviewText, setReviewText] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  if (submitted) return <p className="text-gold text-xs italic">Review submitted. Thank you for your feedback.</p>;
+  if (submitted) return <p className="text-gold text-xs italic">{t('reviewSubmitted')}</p>;
 
   return (
     <div className="space-y-6">
@@ -1422,7 +1473,7 @@ function ReviewForm({ orderId, onSubmit }: { orderId: string, onSubmit: (oid: st
       <textarea 
         className="w-full bg-transparent border border-luxury-border rounded p-4 text-xs placeholder:opacity-30 focus:outline-none focus:border-gold italic transition-all" 
         style={{ backgroundColor: 'color-mix(in srgb, var(--bg-main), transparent 95%)', color: 'var(--text-main)' }}
-        placeholder="Share your experience (optional)"
+        placeholder={t('shareExperience')}
         rows={3}
         value={reviewText}
         onChange={(e) => setReviewText(e.target.value)}
@@ -1438,7 +1489,7 @@ function ReviewForm({ orderId, onSubmit }: { orderId: string, onSubmit: (oid: st
           setSubmitted(true);
         }}
       >
-        Submit Evaluation
+        {t('submitEvaluation')}
       </Button>
     </div>
   );

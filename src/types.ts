@@ -49,7 +49,7 @@ export const AVAILABLE_SERVICES: ServiceType[] = [
     id: "deep-cleaning",
     name: "Deep Cleaning",
     description: "Intensive hand-scrubbing using organic material-specific solutions.",
-    pricePerShoe: 1500,
+    pricePerShoe: 200,
     icon: "Sparkles",
     image: "https://www.jabchaho.com/public/assets_new/images/services/detail/shoe-cleaning.jpg"
   },
@@ -57,7 +57,7 @@ export const AVAILABLE_SERVICES: ServiceType[] = [
     id: "disinfecting",
     name: "Disinfecting",
     description: "UV-C molecular sterilization and hypoallergenic scent infusion.",
-    pricePerShoe: 500,
+    pricePerShoe: 100,
     icon: "ShieldCheck",
     image: "https://bizimages.withfloats.com/actual/68cd253f903986591cb47968.jpg"
   },
@@ -65,7 +65,7 @@ export const AVAILABLE_SERVICES: ServiceType[] = [
     id: "shining",
     name: "Shining & Polish",
     description: "Exhibition-grade wax buffing and hydrophobic edge protection.",
-    pricePerShoe: 1000,
+    pricePerShoe: 150,
     icon: "Zap",
     image: "https://www.theshoecareshop.com/cdn/shop/files/Beginners_poetsen_en_herkleuren.jpg?v=1756384092&width=2400"
   },
