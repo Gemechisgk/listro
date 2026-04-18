@@ -860,7 +860,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <main className={cn("flex-1 p-4 md:p-10 gap-6 md:gap-10", view === 'home' && step < 3 ? "flex flex-col-reverse lg:grid lg:grid-cols-[1fr_350px]" : "flex flex-col max-w-4xl mx-auto w-full")}>
+      <main className={cn("flex-1 p-4 md:p-10 gap-6 md:gap-12 max-w-[1600px] mx-auto w-full", view === 'home' && step < 3 ? "flex flex-col-reverse lg:grid lg:grid-cols-[380px_1fr]" : "flex flex-col max-w-4xl mx-auto w-full")}>
         {view === 'home' && step < 3 && (
           <aside className="flex flex-col gap-6 lg:h-[calc(100vh-140px)] lg:sticky lg:top-28">
             <div className="luxury-card border-none bg-transparent lg:bg-luxury-gray/80 lg:border lg:border-luxury-border p-2 lg:p-6 rounded-xl">
