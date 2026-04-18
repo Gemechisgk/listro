@@ -1155,14 +1155,13 @@ export default function App() {
                       >
                          <p className="text-[10px] uppercase tracking-widest text-text-dim font-bold">{t('pickupInformation')}</p>
                          <AddressAutocomplete 
-                          onSelect={(addr, coords) => {
-                            setAddress(addr);
-                            if (coords) setAddressCoords(coords);
-                            else setAddressCoords(null);
-                          }} 
-                          defaultValue={address} 
-                          t={t}
-                        />
+                            onSelect={(addr, coords) => {
+                              setAddress(addr);
+                              if (coords) setAddressCoords(coords);
+                              else setAddressCoords(null);
+                            } }
+                            defaultValue={address}
+                            t={t} isLoaded={false}                        />
                       </motion.div>
                     )}
                   </AnimatePresence>
