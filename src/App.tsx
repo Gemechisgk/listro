@@ -18,7 +18,7 @@ import {
 import axios from 'axios';
 import { nanoid } from 'nanoid';
 import { 
-  signInWithRedirect, GoogleAuthProvider, onAuthStateChanged, signOut, User 
+  signInWithRedirect, GoogleAuthProvider, onAuthStateChanged, signOut, User, getRedirectResult 
 } from 'firebase/auth';
 import { 
   collection, addDoc, query, where, orderBy, onSnapshot, serverTimestamp, doc, updateDoc, getDoc, setDoc, increment, arrayUnion 
@@ -357,17 +357,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // Handle redirect result specifically for mobile/Vercel
+    getRedirectResult(auth).catch((error) => {
+      console.error('Redirect Error:', error);
+      setLoading(false);
+    });
+
     const splashTimer = setTimeout(() => {
       setShowSplash(false);
-      // If user is not authenticated after splash, show walkthrough every time
-      if (!auth.currentUser) {
-        setWalkthroughStep(1);
-      }
     }, 5500);
 
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
+        // If we have a user, ensure walkthrough is hidden
+        setWalkthroughStep(null);
+        
         const userRef = doc(db, 'users', u.uid);
         const d = await getDoc(userRef);
         if (d.exists()) {
@@ -383,9 +388,18 @@ export default function App() {
           await setDoc(userRef, newProfile);
           setProfile(newProfile as UserProfile);
         }
+      } else {
+        // Only show walkthrough if NO user is found AFTER the splash completes
+        // We use a small delay to ensure onAuthStateChanged had time to find the user
+        setTimeout(() => {
+          if (!auth.currentUser) {
+            setWalkthroughStep(1);
+          }
+        }, 100);
       }
       setLoading(false);
     });
+
     return () => {
       clearTimeout(splashTimer);
       unsubscribe();
